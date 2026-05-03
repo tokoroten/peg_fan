@@ -17,7 +17,9 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
-    "@rollup/rollup-win32-x64-msvc": "^4.60.2",
     "vite": "^5.4.19"
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-win32-x64-msvc": "^4.60.2"
   }
 }
