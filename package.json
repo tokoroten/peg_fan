@@ -1,0 +1,23 @@
+{
+  "name": "peg_fan",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "UNLICENSED",
+  "description": "Browser-only Peggle-like mini game built with Phaser 4.",
+  "dependencies": {
+    "phaser": "^4.1.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "@rollup/rollup-win32-x64-msvc": "^4.60.2",
+    "vite": "^5.4.19"
+  }
+}
