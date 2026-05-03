@@ -9,6 +9,7 @@ const SAVE_KEY = 'peg-fan-save-v1';
 const CANNON_X = WIDTH / 2;
 const CANNON_Y = 168;
 const LAUNCH_SPEED = 660;
+const MATTER_LAUNCH_SPEED = 13.2;
 const MIN_AIM_ANGLE = 0.28;
 const MAX_AIM_ANGLE = Math.PI - 0.28;
 const CHARACTER_ASSETS = [
@@ -218,8 +219,9 @@ class PegFanScene extends Phaser.Scene {
 
   create() {
     this.save = loadSave();
-    this.physics.world.setBounds(36, 0, WIDTH - 72, HEIGHT + 180);
-    this.physics.world.setBoundsCollision(true, true, true, false);
+    this.matterBodies = [];
+    this.matter.world.setBounds(36, 0, WIDTH - 72, HEIGHT + 180, 64, true, true, true, false);
+    this.matter.world.on('collisionstart', (event) => this.handleMatterCollision(event));
     this.input.keyboard?.on('keydown-SPACE', () => this.launchBall());
     this.input.keyboard?.on('keydown-ESC', () => this.showMenu());
     this.showMenu();
@@ -234,8 +236,11 @@ class PegFanScene extends Phaser.Scene {
   }
 
   clearScene() {
+    this.matterBodies?.forEach((body) => {
+      if (body) this.matter.world.remove(body, true);
+    });
+    this.matterBodies = [];
     this.children.removeAll();
-    this.physics.world.colliders.destroy();
     this.balls?.clear(true, true);
     this.pegGroup?.clear(true, true);
     this.brickGroup?.clear(true, true);
@@ -247,7 +252,6 @@ class PegFanScene extends Phaser.Scene {
     this.bucketVisual?.destroy(true);
     this.blockVisuals?.forEach((item) => item.destroy());
     this.blockVisuals = [];
-    this.blockColliders = [];
   }
 
   addBackground(title = 'PEG FAN') {
@@ -439,7 +443,6 @@ class PegFanScene extends Phaser.Scene {
     this.clearScene();
     this.level = generateLevel(levelNumber);
     this.blockVisuals = [];
-    this.blockColliders = [];
     this.shotsLeft = this.level.balls;
     this.score = 0;
     this.targetsLeft = this.level.pegs.filter((peg) => peg.type === 'orange').length
@@ -460,13 +463,7 @@ class PegFanScene extends Phaser.Scene {
     this.createTimedBlocks();
     this.createBumpers();
     this.createSpinners();
-    this.balls = this.physics.add.group();
-    this.physics.add.collider(this.balls, this.pegGroup, this.hitPeg, undefined, this);
-    this.physics.add.collider(this.balls, this.brickGroup, this.hitPeg, undefined, this);
-    this.physics.add.collider(this.balls, this.railGroup, this.hitRail, undefined, this);
-    this.physics.add.collider(this.balls, this.timedBlockGroup, this.hitRail, undefined, this);
-    this.physics.add.collider(this.balls, this.bumperGroup, this.hitBumper, undefined, this);
-    this.physics.add.collider(this.balls, this.spinnerNodeGroup, this.hitBumper, undefined, this);
+    this.balls = this.add.group();
     this.trajectory = this.add.graphics().setDepth(4);
     this.createCannon();
     this.refreshHud();
@@ -504,8 +501,72 @@ class PegFanScene extends Phaser.Scene {
     this.button(778, 70, 164, 50, 'メニュー', () => this.showMenu(), { size: 20 });
   }
 
+  trackMatterBody(gameObject, bodyRole, extra = {}) {
+    gameObject.bodyRole = bodyRole;
+    Object.assign(gameObject, extra);
+    if (gameObject.body) {
+      gameObject.body.gameObject = gameObject;
+      gameObject.body.label = bodyRole;
+      gameObject.body.plugin = { ...(gameObject.body.plugin ?? {}), gameObject };
+      this.matterBodies.push(gameObject.body);
+    }
+    return gameObject;
+  }
+
+  makeMatterCircle(gameObject, radius, bodyRole, options = {}, extra = {}) {
+    this.matter.add.gameObject(gameObject, {
+      shape: { type: 'circle', radius },
+      frictionAir: 0.002,
+      ...options,
+    });
+    return this.trackMatterBody(gameObject, bodyRole, extra);
+  }
+
+  makeMatterRectangle(gameObject, width, height, bodyRole, options = {}, extra = {}) {
+    this.matter.add.gameObject(gameObject, {
+      shape: { type: 'rectangle', width, height },
+      ...options,
+    });
+    return this.trackMatterBody(gameObject, bodyRole, extra);
+  }
+
+  setBodyVelocity(gameObject, x, y) {
+    if (!gameObject?.body) return;
+    if (gameObject.setVelocity) gameObject.setVelocity(x, y);
+    else this.matter.setVelocity(gameObject.body, x, y);
+  }
+
+  destroyMatterObject(gameObject, group) {
+    if (!gameObject) return;
+    if (gameObject.body) {
+      this.matter.world.remove(gameObject.body, true);
+      this.matterBodies = this.matterBodies.filter((body) => body !== gameObject.body);
+    }
+    group?.remove(gameObject, false, false);
+    gameObject.destroy();
+  }
+
+  handleMatterCollision(event) {
+    event.pairs.forEach((pair) => {
+      const a = pair.bodyA?.gameObject;
+      const b = pair.bodyB?.gameObject;
+      if (!a || !b) return;
+      const ball = a.bodyRole === 'ball' ? a : b.bodyRole === 'ball' ? b : null;
+      const other = ball === a ? b : a;
+      if (!ball || !other || ball.caught) return;
+
+      if (other.bodyRole === 'peg' || other.bodyRole === 'brick') {
+        this.hitPeg(ball, other);
+      } else if (other.bodyRole === 'bumper' || other.bodyRole === 'spinner') {
+        this.hitBumper(ball);
+      } else if (other.bodyRole === 'rail' || other.bodyRole === 'timedBlock') {
+        this.hitRail(ball, other);
+      }
+    });
+  }
+
   createPegs() {
-    this.pegGroup = this.physics.add.staticGroup();
+    this.pegGroup = this.add.group();
     this.level.pegs.forEach((data) => {
       const color = data.type === 'orange' ? COLORS.orange : data.type === 'green' ? COLORS.green : data.type === 'purple' ? COLORS.purple : COLORS.blue;
       const peg = this.add.circle(data.x, data.y, 13, color, 1).setStrokeStyle(4, 0xffffff, 0.28);
@@ -514,89 +575,92 @@ class PegFanScene extends Phaser.Scene {
       peg.motion = data.motion;
       peg.baseX = data.x;
       peg.baseY = data.y;
-      this.physics.add.existing(peg, true);
-      peg.body.setCircle(13);
+      this.makeMatterCircle(peg, 13, 'peg', {
+        isStatic: true,
+        restitution: 1,
+        friction: 0,
+      });
       this.pegGroup.add(peg);
     });
   }
 
   createBricks() {
-    this.brickGroup = this.physics.add.staticGroup();
+    this.brickGroup = this.add.group();
     this.level.bricks.forEach((data) => {
       const color = data.type === 'orange' ? COLORS.orange : data.type === 'green' ? COLORS.green : COLORS.blue;
       const visual = this.add.rectangle(data.x, data.y, data.w, data.h, color, 1).setStrokeStyle(3, 0xffffff, 0.28);
       visual.rotation = data.angle;
-      this.blockVisuals.push(visual);
-      this.blockColliders.push({
-        id: `brick-${this.blockColliders.length}`,
-        kind: 'brick',
-        visual,
-        active: true,
-        x: data.x,
-        y: data.y,
-        w: data.w,
-        h: data.h,
+      this.makeMatterRectangle(visual, data.w, data.h, 'brick', {
+        isStatic: true,
         angle: data.angle,
+        restitution: 1,
+        friction: 0,
+      }, {
         pegType: data.type,
         value: data.type === 'orange' ? 450 : data.type === 'green' ? 220 : 120,
       });
+      this.brickGroup.add(visual);
     });
   }
 
   createRails() {
-    this.railGroup = this.physics.add.staticGroup();
+    this.railGroup = this.add.group();
     this.level.rails.forEach((data) => {
       const visual = this.add.rectangle(data.x, data.y, data.w, data.h, 0x8ea2c7, 0.35).setStrokeStyle(2, 0xdbeafe, 0.45);
       visual.rotation = data.angle;
-      this.blockVisuals.push(visual);
-      this.blockColliders.push({
-        id: `rail-${this.blockColliders.length}`,
-        kind: 'rail',
-        visual,
-        active: true,
-        x: data.x,
-        y: data.y,
-        w: data.w,
-        h: data.h,
+      this.makeMatterRectangle(visual, data.w, data.h, 'rail', {
+        isStatic: true,
         angle: data.angle,
+        restitution: 1,
+        friction: 0,
       });
+      this.railGroup.add(visual);
     });
   }
 
   createTimedBlocks() {
-    this.timedBlockGroup = this.physics.add.staticGroup();
+    this.timedBlockGroup = this.add.group();
     this.level.timedBlocks.forEach((data) => {
       const block = this.add.rectangle(data.x, data.y, data.w, data.h, 0x38bdf8, 0.52).setStrokeStyle(2, 0xe0f2fe, 0.72);
       block.period = data.period;
       block.phase = data.phase;
       block.baseAlpha = 0.52;
-      this.physics.add.existing(block, true);
-      block.body.setSize(data.w, data.h);
+      this.makeMatterRectangle(block, data.w, data.h, 'timedBlock', {
+        isStatic: true,
+        restitution: 1,
+        friction: 0,
+      });
       this.timedBlockGroup.add(block);
     });
   }
 
   createBumpers() {
-    this.bumperGroup = this.physics.add.staticGroup();
+    this.bumperGroup = this.add.group();
     this.level.bumpers.forEach((data) => {
       const bumper = this.add.circle(data.x, data.y, data.r, 0xe7eef8, 0.18).setStrokeStyle(5, COLORS.cyan, 0.72);
-      this.physics.add.existing(bumper, true);
-      bumper.body.setCircle(data.r);
+      this.makeMatterCircle(bumper, data.r, 'bumper', {
+        isStatic: true,
+        restitution: 1.15,
+        friction: 0,
+      });
       this.bumperGroup.add(bumper);
     });
   }
 
   createSpinners() {
     this.spinnerGraphics = this.add.graphics().setDepth(3);
-    this.spinnerNodeGroup = this.physics.add.staticGroup();
+    this.spinnerNodeGroup = this.add.group();
     this.spinnerNodes = [];
     this.level.spinners.forEach((data) => {
       const hub = this.add.circle(data.x, data.y, 12, 0xf8fafc, 0.3).setStrokeStyle(3, COLORS.gold, 0.85);
       const a = this.add.circle(data.x + data.radius, data.y, 16, 0xfef08a, 0.9).setStrokeStyle(3, 0x8b6814);
       const b = this.add.circle(data.x - data.radius, data.y, 16, 0xfef08a, 0.9).setStrokeStyle(3, 0x8b6814);
       [hub, a, b].forEach((node) => {
-        this.physics.add.existing(node, true);
-        node.body.setCircle(node.radius ?? 12);
+        this.makeMatterCircle(node, node.radius ?? 12, 'spinner', {
+          isStatic: true,
+          restitution: 1.2,
+          friction: 0,
+        });
         this.spinnerNodeGroup.add(node);
       });
       this.spinnerNodes.push({ ...data, hub, a, b, angle: data.phase });
@@ -701,11 +765,14 @@ class PegFanScene extends Phaser.Scene {
     this.pegGroup?.getChildren().forEach((peg) => addCircle(peg, 18));
     this.bumperGroup?.getChildren().forEach((bumper) => addCircle(bumper, (bumper.radius ?? 24) + 6));
     this.spinnerNodeGroup?.getChildren().forEach((node) => addCircle(node, (node.radius ?? 14) + 6));
-    this.blockColliders?.forEach((block) => {
-      if (block.active) rects.push({ x: block.x, y: block.y, w: block.w + 18, h: block.h + 18, angle: block.angle });
+    this.brickGroup?.getChildren().forEach((rect) => {
+      if (rect?.active && rect.visible !== false) rects.push({ x: rect.x, y: rect.y, w: rect.width + 18, h: rect.height + 18, angle: rect.rotation });
+    });
+    this.railGroup?.getChildren().forEach((rect) => {
+      if (rect?.active && rect.visible !== false) rects.push({ x: rect.x, y: rect.y, w: rect.width + 18, h: rect.height + 18, angle: rect.rotation });
     });
     this.timedBlockGroup?.getChildren().forEach((rect) => {
-      if (rect?.active && rect.visible !== false && rect.body?.enable !== false) rects.push({ x: rect.x, y: rect.y, w: rect.width + 16, h: rect.height + 16 });
+      if (rect?.active && rect.visible !== false && rect.body?.collisionFilter?.mask !== 0) rects.push({ x: rect.x, y: rect.y, w: rect.width + 16, h: rect.height + 16 });
     });
     return { circles, rects };
   }
@@ -747,81 +814,6 @@ class PegFanScene extends Phaser.Scene {
     };
   }
 
-  collideBallWithOrientedBlock(ball, block) {
-    if (!ball?.active || !ball.body || !block.active) return false;
-    const radius = ball.radius ?? 11;
-    const cos = Math.cos(-block.angle);
-    const sin = Math.sin(-block.angle);
-    const dx = ball.x - block.x;
-    const dy = ball.y - block.y;
-    const localX = dx * cos - dy * sin;
-    const localY = dx * sin + dy * cos;
-    const halfW = block.w / 2;
-    const halfH = block.h / 2;
-    const closestX = Phaser.Math.Clamp(localX, -halfW, halfW);
-    const closestY = Phaser.Math.Clamp(localY, -halfH, halfH);
-    const diffX = localX - closestX;
-    const diffY = localY - closestY;
-    const distSq = diffX * diffX + diffY * diffY;
-    if (distSq > radius * radius) return false;
-
-    let localNx = diffX;
-    let localNy = diffY;
-    const dist = Math.sqrt(distSq);
-    if (dist > 0.0001) {
-      localNx /= dist;
-      localNy /= dist;
-    } else {
-      const penX = halfW - Math.abs(localX);
-      const penY = halfH - Math.abs(localY);
-      if (penX < penY) {
-        localNx = Math.sign(localX) || 1;
-        localNy = 0;
-      } else {
-        localNx = 0;
-        localNy = Math.sign(localY) || 1;
-      }
-    }
-
-    const worldCos = Math.cos(block.angle);
-    const worldSin = Math.sin(block.angle);
-    const nx = localNx * worldCos - localNy * worldSin;
-    const ny = localNx * worldSin + localNy * worldCos;
-    const reflected = this.reflectVelocity(ball.body.velocity.x, ball.body.velocity.y, nx, ny, 0.94);
-    ball.x += nx * Math.max(2, radius - dist + 1);
-    ball.y += ny * Math.max(2, radius - dist + 1);
-    ball.body.velocity.set(reflected.x, reflected.y);
-
-    if (block.kind === 'brick') this.hitBlock(ball, block);
-    else this.playSfx('bumper', { volume: 0.38 });
-    return true;
-  }
-
-  hitBlock(ball, block) {
-    if (!block.active) return;
-    block.active = false;
-    this.score += block.value;
-    if (block.pegType === 'orange') this.targetsLeft -= 1;
-    if (block.pegType === 'green') this.multiballQueued = true;
-    this.playSfx(block.pegType === 'orange' ? 'orange' : block.pegType === 'green' ? 'green' : 'peg', { volume: 0.6 });
-    this.burst(block.x, block.y, block.pegType === 'orange' ? COLORS.orange : block.pegType === 'green' ? COLORS.green : COLORS.blue);
-    this.popText(block.x, block.y - 20, `+${block.value}`, block.pegType === 'orange' ? '#ffb088' : '#dbeafe');
-    this.tweens.add({
-      targets: block.visual,
-      scale: 1.12,
-      alpha: 0,
-      duration: 180,
-      ease: 'Cubic.easeOut',
-      onComplete: () => block.visual.destroy(),
-    });
-    this.refreshHud();
-    if (this.multiballQueued && this.inFlight === 1) {
-      this.multiballQueued = false;
-      this.spawnBall(ball.x, ball.y, -ball.body.velocity.x * 0.7, ball.body.velocity.y * 0.8);
-    }
-    if (this.targetsLeft <= 0) this.clearLevel();
-  }
-
   launchBall(pointer = this.input.activePointer) {
     if (this.view !== 'game' || this.inFlight > 0 || this.shotsLeft <= 0) return;
     this.currentAim = this.calculateAim(pointer);
@@ -829,8 +821,8 @@ class PegFanScene extends Phaser.Scene {
     this.spawnBall(
       muzzle.x,
       muzzle.y,
-      this.currentAim.x * LAUNCH_SPEED,
-      this.currentAim.y * LAUNCH_SPEED,
+      this.currentAim.x * MATTER_LAUNCH_SPEED,
+      this.currentAim.y * MATTER_LAUNCH_SPEED,
     );
     this.flashLaunch();
     this.playSfx('launch', { volume: 0.55 });
@@ -890,72 +882,29 @@ class PegFanScene extends Phaser.Scene {
     });
   }
 
-  reflectBallFrom(ball, x, y, minSpeed = 520, boost = 1.04) {
-    let vx = ball.body.velocity.x;
-    let vy = ball.body.velocity.y;
-    if (Math.hypot(vx, vy) < 80) {
-      vx = this.currentAim.x * LAUNCH_SPEED;
-      vy = this.currentAim.y * LAUNCH_SPEED;
-    }
-    let nx = ball.x - x;
-    let ny = ball.y - y;
-    const normalLength = Math.hypot(nx, ny) || 1;
-    nx /= normalLength;
-    ny /= normalLength;
-    const dot = vx * nx + vy * ny;
-    let rvx = (vx - 2 * dot * nx) * boost;
-    let rvy = (vy - 2 * dot * ny) * boost;
-    const speed = Math.hypot(rvx, rvy) || 1;
-    if (speed < minSpeed) {
-      const scale = minSpeed / speed;
-      rvx *= scale;
-      rvy *= scale;
-    }
-    this.time.delayedCall(0, () => {
-      if (!ball.active || !ball.body) return;
-      ball.body.velocity.set(rvx, rvy);
-    });
-  }
-
   hitRail(ball, obstacle) {
-    this.reflectBallFrom(ball, obstacle.x, obstacle.y, 560, 1.03);
+    if (ball.body) this.setBodyVelocity(ball, ball.body.velocity.x * 1.02, ball.body.velocity.y * 1.02);
     this.playSfx('bumper', { volume: 0.42 });
   }
 
   spawnBall(x, y, vx, vy) {
     const ball = this.add.circle(x, y, 11, 0xffffff, 1).setStrokeStyle(3, COLORS.gold);
-    this.physics.add.existing(ball);
+    this.makeMatterCircle(ball, 11, 'ball', {
+      restitution: 0.96,
+      friction: 0,
+      frictionAir: 0.0015,
+      density: 0.001,
+      label: 'ball',
+    });
     this.balls.add(ball);
-    ball.body.setCircle(11);
-    ball.body.setBounce(0.94, 0.94);
-    ball.body.setDrag(3, 0);
-    ball.body.setCollideWorldBounds(true);
-    ball.body.velocity.set(vx, vy);
+    ball.setVelocity(vx, vy);
     this.inFlight += 1;
   }
 
   hitPeg(ball, peg) {
-    if (peg.blockShared) {
-      if (peg.blockShared.hit) return;
-      peg.blockShared.hit = true;
-      peg.blockShared.nodes.forEach((node) => {
-        if (node !== peg) {
-          node.hit = true;
-          this.brickGroup.remove(node, true, true);
-        }
-      });
-      this.tweens.add({
-        targets: peg.blockShared.visual,
-        scale: 1.12,
-        alpha: 0,
-        duration: 180,
-        ease: 'Cubic.easeOut',
-        onComplete: () => peg.blockShared.visual.destroy(),
-      });
-    }
     if (peg.hit) return;
     peg.hit = true;
-    this.reflectBallFrom(ball, peg.x, peg.y, 500, 1.02);
+    if (ball.body) this.setBodyVelocity(ball, ball.body.velocity.x * 1.03, ball.body.velocity.y * 1.03);
     this.score += peg.value;
     if (peg.pegType === 'orange') this.targetsLeft -= 1;
     if (peg.pegType === 'green') this.multiballQueued = true;
@@ -969,7 +918,7 @@ class PegFanScene extends Phaser.Scene {
       duration: 190,
       ease: 'Cubic.easeOut',
       onComplete: () => {
-        this.pegGroup.remove(peg, true, true);
+        this.destroyMatterObject(peg, peg.bodyRole === 'brick' ? this.brickGroup : this.pegGroup);
       },
     });
     if (this.multiballQueued && this.inFlight === 1) {
@@ -982,7 +931,7 @@ class PegFanScene extends Phaser.Scene {
 
   hitBumper(ball) {
     this.score += 35;
-    this.reflectBallFrom(ball, ball.x, ball.y - 1, 620, 1.12);
+    if (ball.body) this.setBodyVelocity(ball, ball.body.velocity.x * 1.12, ball.body.velocity.y * 1.12);
     this.playSfx('bumper', { volume: 0.5 });
     this.burst(ball.x, ball.y, COLORS.cyan);
     this.refreshHud();
@@ -1014,6 +963,10 @@ class PegFanScene extends Phaser.Scene {
     if (!ball?.active) return;
     this.inFlight = Math.max(0, this.inFlight - 1);
     this.balls?.remove(ball, false, false);
+    if (ball.body) {
+      this.matter.world.remove(ball.body, true);
+      this.matterBodies = this.matterBodies.filter((body) => body !== ball.body);
+    }
     ball.destroy();
     if (this.inFlight === 0 && this.shotsLeft <= 0 && this.targetsLeft > 0) this.failLevel();
   }
@@ -1208,24 +1161,21 @@ class PegFanScene extends Phaser.Scene {
         this.catchBall(ball);
         return;
       }
-      for (const block of this.blockColliders ?? []) {
-        if (this.collideBallWithOrientedBlock(ball, block)) break;
-      }
       const speed = Math.hypot(ball.body.velocity.x, ball.body.velocity.y);
-      if (speed < 55 && ball.y < HEIGHT - 120) {
+      if (speed < 0.6 && ball.y < HEIGHT - 120) {
         ball.stallTime = (ball.stallTime ?? 0) + delta;
         if (ball.stallTime > 360) {
           const nudgeX = Phaser.Math.Clamp((ball.x - WIDTH / 2) * 1.6, -260, 260);
           if (!ball.body) return;
-          ball.body.velocity.set(nudgeX, 430);
+          this.setBodyVelocity(ball, nudgeX / 60, 7.2);
           ball.stallTime = 0;
         }
       } else {
         ball.stallTime = 0;
       }
-      if (speed < 80 && ball.y > 1030) {
+      if (speed < 1.0 && ball.y > 1030) {
         if (!ball.body) return;
-        ball.body.velocity.set(ball.body.velocity.x * 1.04, ball.body.velocity.y + 12);
+        this.setBodyVelocity(ball, ball.body.velocity.x * 1.04, ball.body.velocity.y + 0.2);
       }
     });
   }
@@ -1240,7 +1190,7 @@ class PegFanScene extends Phaser.Scene {
       } else {
         peg.y = peg.baseY + offset;
       }
-      peg.body.updateFromGameObject?.();
+      if (peg.body) this.matter.body.setPosition(peg.body, { x: peg.x, y: peg.y });
     });
 
     this.timedBlockGroup?.getChildren().forEach((block) => {
@@ -1249,7 +1199,10 @@ class PegFanScene extends Phaser.Scene {
       const enabled = wave > -0.25;
       block.setAlpha(enabled ? block.baseAlpha : 0.12);
       block.setFillStyle(enabled ? 0x38bdf8 : 0x233044, enabled ? 0.52 : 0.18);
-      block.body.enable = enabled;
+      if (block.body) {
+        block.body.isSensor = !enabled;
+        block.body.collisionFilter.mask = enabled ? 0xffffffff : 0;
+      }
     });
 
     if (this.spinnerGraphics) {
@@ -1263,8 +1216,8 @@ class PegFanScene extends Phaser.Scene {
         const by = spinner.y + Math.sin(spinner.angle + Math.PI) * spinner.radius;
         spinner.a.setPosition(ax, ay);
         spinner.b.setPosition(bx, by);
-        spinner.a.body?.updateFromGameObject?.();
-        spinner.b.body?.updateFromGameObject?.();
+        if (spinner.a.body) this.matter.body.setPosition(spinner.a.body, { x: ax, y: ay });
+        if (spinner.b.body) this.matter.body.setPosition(spinner.b.body, { x: bx, y: by });
         this.spinnerGraphics.lineBetween(ax, ay, bx, by);
       });
     }
@@ -1278,9 +1231,9 @@ const game = new Phaser.Game({
   height: HEIGHT,
   backgroundColor: '#101521',
   physics: {
-    default: 'arcade',
-    arcade: {
-      gravity: { y: 760 },
+    default: 'matter',
+    matter: {
+      gravity: { y: 1.05 },
       debug: false,
     },
   },
