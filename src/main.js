@@ -125,6 +125,7 @@ class PegFanScene extends Phaser.Scene {
     this.save = loadSave();
     this.physics.world.setBounds(36, 0, WIDTH - 72, HEIGHT + 180);
     this.physics.world.setBoundsCollision(true, true, true, false);
+    this.input.on('pointerdown', () => this.launchBall());
     this.input.keyboard?.on('keydown-SPACE', () => this.launchBall());
     this.input.keyboard?.on('keydown-ESC', () => this.showMenu());
     this.showMenu();
@@ -280,6 +281,8 @@ class PegFanScene extends Phaser.Scene {
     this.targetsLeft = this.level.pegs.filter((peg) => peg.type === 'orange').length;
     this.inFlight = 0;
     this.multiballQueued = false;
+    this.rewardedContinuesUsed = 0;
+    this.levelCleared = false;
 
     this.addBackground(`LEVEL ${levelNumber}`);
     this.createGameUi();
@@ -292,7 +295,6 @@ class PegFanScene extends Phaser.Scene {
     this.physics.add.overlap(this.balls, this.bucket, this.catchBall, undefined, this);
     this.aimLine = this.add.line(0, 0, WIDTH / 2, 168, WIDTH / 2, 168, COLORS.gold, 0.78).setLineWidth(4, 2);
     this.cannon = this.add.triangle(WIDTH / 2, 168, -30, 24, 30, 24, 0, -42, COLORS.gold).setStrokeStyle(3, 0x7a5d10);
-    this.input.on('pointerdown', () => this.launchBall());
     this.refreshHud();
   }
 
@@ -427,23 +429,120 @@ class PegFanScene extends Phaser.Scene {
 
   showResult(success) {
     this.view = 'result';
+    this.resultOverlay?.destroy(true);
     const level = this.level.level;
-    this.add.rectangle(WIDTH / 2, HEIGHT / 2, 700, 430, 0x0e1420, 0.96).setStrokeStyle(2, success ? COLORS.gold : COLORS.red);
-    this.add.text(WIDTH / 2, HEIGHT / 2 - 142, success ? 'STAGE CLEAR' : 'TRY AGAIN', {
+    const canContinue = !success && this.rewardedContinuesUsed < 1;
+    this.resultOverlay = this.add.container(0, 0).setDepth(50);
+    this.resultOverlay.add(this.add.rectangle(WIDTH / 2, HEIGHT / 2, 720, canContinue ? 520 : 430, 0x0e1420, 0.96).setStrokeStyle(2, success ? COLORS.gold : COLORS.red));
+    this.resultOverlay.add(this.add.text(WIDTH / 2, HEIGHT / 2 - 180, success ? 'STAGE CLEAR' : 'OUT OF BALLS', {
       fontFamily: 'Verdana',
       fontSize: 48,
       fontStyle: '700',
       color: success ? COLORS.gold : '#ff8ba6',
-    }).setOrigin(0.5);
-    this.add.text(WIDTH / 2, HEIGHT / 2 - 66, `SCORE ${this.score}`, {
+    }).setOrigin(0.5));
+    this.resultOverlay.add(this.add.text(WIDTH / 2, HEIGHT / 2 - 106, `SCORE ${this.score}   TARGET ${this.targetsLeft}`, {
       fontFamily: 'Verdana',
       fontSize: 30,
       color: COLORS.text,
-    }).setOrigin(0.5);
+    }).setOrigin(0.5));
+
+    if (canContinue) {
+      this.resultOverlay.add(this.add.text(WIDTH / 2, HEIGHT / 2 - 54, 'ダミー動画広告を最後まで見ると、弾を3発補充して続行できます。', {
+        fontFamily: 'Meiryo, Verdana',
+        fontSize: 22,
+        color: COLORS.muted,
+        align: 'center',
+        wordWrap: { width: 610 },
+      }).setOrigin(0.5));
+      const adButton = this.button(WIDTH / 2, HEIGHT / 2 + 38, 440, 68, '動画広告で +3 BALL', () => this.showRewardedAd(), {
+        fill: 0x6b4b18,
+        stroke: COLORS.gold,
+        size: 24,
+      });
+      this.resultOverlay.add([adButton.rect, adButton.text]);
+      this.resultOverlay.add(this.add.text(WIDTH / 2, HEIGHT / 2 + 92, 'PLACEMENT: rewarded_continue_dummy', {
+        fontFamily: 'Verdana',
+        fontSize: 16,
+        color: '#7f8aa0',
+      }).setOrigin(0.5));
+    }
+
     const next = Math.min(TOTAL_LEVELS, level + 1);
-    this.button(WIDTH / 2 - 185, HEIGHT / 2 + 48, 260, 64, success && level < TOTAL_LEVELS ? '次へ' : '再挑戦', () => this.startLevel(success && level < TOTAL_LEVELS ? next : level), { fill: 0x2c6f84 });
-    this.button(WIDTH / 2 + 185, HEIGHT / 2 + 48, 260, 64, '選択へ', () => this.showLevelSelect());
-    this.button(WIDTH / 2, HEIGHT / 2 + 138, 300, 58, 'ギャラリー', () => this.showGallery(), { fill: 0x4a3d21, stroke: COLORS.gold });
+    const y = canContinue ? HEIGHT / 2 + 178 : HEIGHT / 2 + 48;
+    const retry = this.button(WIDTH / 2 - 185, y, 260, 64, success && level < TOTAL_LEVELS ? '次へ' : '再挑戦', () => this.startLevel(success && level < TOTAL_LEVELS ? next : level), { fill: 0x2c6f84 });
+    const select = this.button(WIDTH / 2 + 185, y, 260, 64, '選択へ', () => this.showLevelSelect());
+    const gallery = this.button(WIDTH / 2, y + 90, 300, 58, 'ギャラリー', () => this.showGallery(), { fill: 0x4a3d21, stroke: COLORS.gold });
+    this.resultOverlay.add([retry.rect, retry.text, select.rect, select.text, gallery.rect, gallery.text]);
+  }
+
+  showRewardedAd() {
+    this.view = 'ad';
+    this.resultOverlay?.destroy(true);
+    const overlay = this.add.container(0, 0).setDepth(70);
+    this.adOverlay = overlay;
+    overlay.add(this.add.rectangle(WIDTH / 2, HEIGHT / 2, 720, 500, 0x080d15, 0.98).setStrokeStyle(2, COLORS.gold));
+    overlay.add(this.add.text(WIDTH / 2, HEIGHT / 2 - 178, 'REWARDED AD', {
+      fontFamily: 'Verdana',
+      fontSize: 48,
+      fontStyle: '700',
+      color: COLORS.gold,
+    }).setOrigin(0.5));
+    overlay.add(this.add.text(WIDTH / 2, HEIGHT / 2 - 112, 'DUMMY PLACEMENT', {
+      fontFamily: 'Verdana',
+      fontSize: 24,
+      color: COLORS.cyan,
+    }).setOrigin(0.5));
+    overlay.add(this.add.text(WIDTH / 2, HEIGHT / 2 - 48, 'ここに動画広告SDKのリワード広告を差し込みます。', {
+      fontFamily: 'Meiryo, Verdana',
+      fontSize: 23,
+      color: COLORS.text,
+      align: 'center',
+      wordWrap: { width: 590 },
+    }).setOrigin(0.5));
+    const barBack = this.add.rectangle(WIDTH / 2, HEIGHT / 2 + 60, 520, 26, 0x273246, 1);
+    const bar = this.add.rectangle(WIDTH / 2 - 260, HEIGHT / 2 + 60, 0, 26, COLORS.gold, 1).setOrigin(0, 0.5);
+    const countdown = this.add.text(WIDTH / 2, HEIGHT / 2 + 112, '視聴中 3.0s', {
+      fontFamily: 'Meiryo, Verdana',
+      fontSize: 22,
+      color: COLORS.muted,
+    }).setOrigin(0.5);
+    overlay.add([barBack, bar, countdown]);
+
+    const duration = 3000;
+    this.tweens.add({
+      targets: bar,
+      displayWidth: 520,
+      duration,
+      ease: 'Linear',
+      onUpdate: (tween) => {
+        const left = Math.max(0, (duration * (1 - tween.progress)) / 1000);
+        countdown.setText(`視聴中 ${left.toFixed(1)}s`);
+      },
+      onComplete: () => this.grantRewardedBalls(),
+    });
+  }
+
+  grantRewardedBalls() {
+    this.adOverlay?.destroy(true);
+    this.rewardedContinuesUsed += 1;
+    this.shotsLeft += 3;
+    this.score += 100;
+    this.view = 'game';
+    this.refreshHud();
+    const toast = this.add.text(WIDTH / 2, 232, '+3 BALL CONTINUE', {
+      fontFamily: 'Verdana',
+      fontSize: 34,
+      fontStyle: '700',
+      color: COLORS.gold,
+    }).setOrigin(0.5).setDepth(60);
+    this.tweens.add({
+      targets: toast,
+      y: 190,
+      alpha: 0,
+      duration: 1200,
+      ease: 'Cubic.easeOut',
+      onComplete: () => toast.destroy(),
+    });
   }
 
   update(_, delta) {
