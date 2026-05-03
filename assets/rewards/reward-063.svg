@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 1300">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#10231f"/><stop offset="1" stop-color="#06b6d4"/></linearGradient>
+    <linearGradient id="costume" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#84cc16"/><stop offset="1" stop-color="#06b6d4"/></linearGradient>
+    <filter id="soft"><feDropShadow dx="0" dy="18" stdDeviation="18" flood-opacity=".35"/></filter>
+  </defs>
+  <rect width="900" height="1300" fill="url(#bg)"/>
+  <circle cx="654" cy="288" r="112" fill="#fff" opacity=".08"/>
+  <circle cx="526" cy="484" r="68" fill="#84cc16" opacity=".16"/>
+  <path d="M82 1120 C220 1010 676 1018 818 1120 L818 1300 L82 1300 Z" fill="#050914" opacity=".22"/>
+  <g filter="url(#soft)">
+    <path d="M194 1074C270 835 329 701 451 701s196 145 263 373c-137 86-390 87-520 0z" fill="url(#costume)"/>
+    <circle cx="451" cy="431" r="188" fill="#e7b18e"/>
+    <path d="M252 438c-10-169 90-285 221-285 133 0 223 94 225 258-78-62-146-96-236-105-74-7-150 30-210 132z" fill="#46213d"/>
+    <circle cx="374" cy="419" r="18" fill="#202431"/><circle cx="535" cy="419" r="18" fill="#202431"/>
+    <path d="M318 521c48 55 180 60 251 1" fill="none" stroke="#8b3d51" stroke-width="18" stroke-linecap="round"/>
+    <path d="M154 975c134 92 453 106 594 4" fill="none" stroke="#fff" stroke-width="16" opacity=".45"/>
+  </g>
+  <text x="60" y="1206" fill="#fff" font-family="Verdana" font-size="52" font-weight="700">Reward 063</text>
+  <text x="64" y="1262" fill="#84cc16" font-family="Verdana" font-size="26" font-weight="700">PEG FAN CLEAR ART</text>
+</svg>
