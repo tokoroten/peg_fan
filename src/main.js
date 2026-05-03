@@ -365,9 +365,9 @@ class PegFanScene extends Phaser.Scene {
     this.physics.add.collider(this.balls, this.pegGroup, this.hitPeg, undefined, this);
     this.physics.add.collider(this.balls, this.bumperGroup, this.hitBumper, undefined, this);
     this.physics.add.overlap(this.balls, this.bucket, this.catchBall, undefined, this);
-    this.trajectory = this.add.graphics();
-    this.aimLine = this.add.line(0, 0, CANNON_X, CANNON_Y, CANNON_X, CANNON_Y + 220, COLORS.gold, 0.78).setLineWidth(4, 2);
-    this.cannon = this.add.triangle(CANNON_X, CANNON_Y, -30, 24, 30, 24, 0, -42, COLORS.gold).setStrokeStyle(3, 0x7a5d10);
+    this.trajectory = this.add.graphics().setDepth(4);
+    this.aimLine = this.add.line(0, 0, CANNON_X, CANNON_Y, CANNON_X, CANNON_Y + 220, COLORS.gold, 0.5).setLineWidth(3, 2).setDepth(5);
+    this.createCannon();
     this.refreshHud();
   }
 
@@ -376,6 +376,25 @@ class PegFanScene extends Phaser.Scene {
       .setInteractive({ useHandCursor: true });
     this.aimZone.on('pointerdown', (pointer) => this.launchBall(pointer));
     this.aimZone.on('pointermove', (pointer) => this.updateAimFromPointer(pointer));
+  }
+
+  createCannon() {
+    this.cannonBase = this.add.circle(CANNON_X, CANNON_Y, 34, 0x1f2a3c, 1)
+      .setStrokeStyle(5, COLORS.gold, 0.9)
+      .setDepth(10);
+    this.cannonBarrelShadow = this.add.rectangle(CANNON_X, CANNON_Y, 25, 82, 0x070b12, 0.45)
+      .setOrigin(0.5, 0.18)
+      .setDepth(9);
+    this.cannonBarrel = this.add.rectangle(CANNON_X, CANNON_Y, 22, 78, COLORS.gold, 1)
+      .setOrigin(0.5, 0.18)
+      .setStrokeStyle(4, 0x8b6814, 0.95)
+      .setDepth(11);
+    this.cannonMuzzle = this.add.circle(CANNON_X, CANNON_Y, 13, 0xfff2a6, 1)
+      .setStrokeStyle(3, 0x8b6814, 1)
+      .setDepth(12);
+    this.cannonCore = this.add.circle(CANNON_X, CANNON_Y, 15, 0x101827, 1)
+      .setStrokeStyle(3, 0x59677f, 0.9)
+      .setDepth(13);
   }
 
   createGameUi() {
@@ -445,13 +464,21 @@ class PegFanScene extends Phaser.Scene {
     this.currentAim = this.calculateAim(pointer);
   }
 
+  getMuzzlePoint(distance = 72) {
+    return {
+      x: CANNON_X + this.currentAim.x * distance,
+      y: CANNON_Y + this.currentAim.y * distance,
+    };
+  }
+
   drawTrajectory() {
     if (!this.trajectory || !this.currentAim) return;
     this.trajectory.clear();
     if (this.inFlight > 0 || this.shotsLeft <= 0) return;
     this.trajectory.fillStyle(COLORS.gold, 0.54);
-    let x = CANNON_X;
-    let y = CANNON_Y;
+    const muzzle = this.getMuzzlePoint(74);
+    let x = muzzle.x;
+    let y = muzzle.y;
     let vx = this.currentAim.x * LAUNCH_SPEED;
     let vy = this.currentAim.y * LAUNCH_SPEED;
     const gravity = 760;
@@ -474,9 +501,10 @@ class PegFanScene extends Phaser.Scene {
   launchBall(pointer = this.input.activePointer) {
     if (this.view !== 'game' || this.inFlight > 0 || this.shotsLeft <= 0) return;
     this.currentAim = this.calculateAim(pointer);
+    const muzzle = this.getMuzzlePoint(76);
     this.spawnBall(
-      CANNON_X + this.currentAim.x * 22,
-      CANNON_Y + this.currentAim.y * 22,
+      muzzle.x,
+      muzzle.y,
       this.currentAim.x * LAUNCH_SPEED,
       this.currentAim.y * LAUNCH_SPEED,
     );
@@ -488,8 +516,8 @@ class PegFanScene extends Phaser.Scene {
 
   flashLaunch() {
     const ring = this.add.circle(
-      CANNON_X + this.currentAim.x * 34,
-      CANNON_Y + this.currentAim.y * 34,
+      CANNON_X + this.currentAim.x * 76,
+      CANNON_Y + this.currentAim.y * 76,
       14,
       COLORS.gold,
       0.34,
@@ -613,7 +641,9 @@ class PegFanScene extends Phaser.Scene {
     this.refreshHud();
   }
 
-  catchBall(ball) {
+  catchBall(objectA, objectB) {
+    const ball = this.balls?.contains(objectA) ? objectA : this.balls?.contains(objectB) ? objectB : null;
+    if (!ball || ball === this.bucket) return;
     if (ball.caught) return;
     ball.caught = true;
     this.shotsLeft += 1;
@@ -625,7 +655,9 @@ class PegFanScene extends Phaser.Scene {
   }
 
   removeBall(ball) {
+    if (!ball?.active) return;
     this.inFlight = Math.max(0, this.inFlight - 1);
+    this.balls?.remove(ball, false, false);
     ball.destroy();
     if (this.inFlight === 0 && this.shotsLeft <= 0 && this.targetsLeft > 0) this.failLevel();
   }
@@ -792,25 +824,38 @@ class PegFanScene extends Phaser.Scene {
   update(_, delta) {
     if (this.view !== 'game') return;
     const dt = delta / 1000;
-    this.bucket.x += this.bucketDirection * this.level.bucketSpeed * dt;
-    if (this.bucket.x < 120 || this.bucket.x > WIDTH - 120) this.bucketDirection *= -1;
-    this.bucket.body.updateFromGameObject();
+    if (this.bucket?.active && this.bucket.body) {
+      this.bucket.x += this.bucketDirection * this.level.bucketSpeed * dt;
+      if (this.bucket.x < 120 || this.bucket.x > WIDTH - 120) this.bucketDirection *= -1;
+      this.bucket.body.updateFromGameObject?.();
+    }
 
     this.updateAimFromPointer();
-    const aimLength = 245;
-    const endX = CANNON_X + this.currentAim.x * aimLength;
-    const endY = CANNON_Y + this.currentAim.y * aimLength;
-    this.aimLine.setTo(CANNON_X, CANNON_Y, endX, endY);
-    this.cannon.rotation = this.currentAim.angle + Math.PI / 2;
+    const muzzle = this.getMuzzlePoint(78);
+    const endX = CANNON_X + this.currentAim.x * 255;
+    const endY = CANNON_Y + this.currentAim.y * 255;
+    this.aimLine.setTo(muzzle.x, muzzle.y, endX, endY);
+    const barrelRotation = this.currentAim.angle - Math.PI / 2;
+    this.cannonBarrel.rotation = barrelRotation;
+    this.cannonBarrelShadow.rotation = barrelRotation;
+    this.cannonMuzzle.setPosition(muzzle.x, muzzle.y);
     this.drawTrajectory();
 
-    this.balls?.getChildren().forEach((ball) => {
-      if (ball.y > HEIGHT + 90) this.removeBall(ball);
-      const speed = ball.body ? Math.hypot(ball.body.velocity.x, ball.body.velocity.y) : 0;
+    this.balls?.getChildren().slice().forEach((ball) => {
+      if (!ball?.active || !ball.body) {
+        this.balls?.remove(ball, false, false);
+        return;
+      }
+      if (ball.y > HEIGHT + 90) {
+        this.removeBall(ball);
+        return;
+      }
+      const speed = Math.hypot(ball.body.velocity.x, ball.body.velocity.y);
       if (speed < 55 && ball.y < HEIGHT - 120) {
         ball.stallTime = (ball.stallTime ?? 0) + delta;
         if (ball.stallTime > 360) {
           const nudgeX = Phaser.Math.Clamp((ball.x - WIDTH / 2) * 1.6, -260, 260);
+          if (!ball.body) return;
           ball.body.velocity.set(nudgeX, 430);
           ball.stallTime = 0;
         }
@@ -818,6 +863,7 @@ class PegFanScene extends Phaser.Scene {
         ball.stallTime = 0;
       }
       if (speed < 80 && ball.y > 1030) {
+        if (!ball.body) return;
         ball.body.velocity.set(ball.body.velocity.x * 1.04, ball.body.velocity.y + 12);
       }
     });
