@@ -244,6 +244,10 @@ class PegFanScene extends Phaser.Scene {
     this.bumperGroup?.clear(true, true);
     this.spinnerNodeGroup?.clear(true, true);
     this.spinnerGraphics?.destroy();
+    this.bucketVisual?.destroy(true);
+    this.blockVisuals?.forEach((item) => item.destroy());
+    this.blockVisuals = [];
+    this.blockColliders = [];
   }
 
   addBackground(title = 'PEG FAN') {
@@ -434,6 +438,8 @@ class PegFanScene extends Phaser.Scene {
     this.view = 'game';
     this.clearScene();
     this.level = generateLevel(levelNumber);
+    this.blockVisuals = [];
+    this.blockColliders = [];
     this.shotsLeft = this.level.balls;
     this.score = 0;
     this.targetsLeft = this.level.pegs.filter((peg) => peg.type === 'orange').length
@@ -461,7 +467,6 @@ class PegFanScene extends Phaser.Scene {
     this.physics.add.collider(this.balls, this.timedBlockGroup, this.hitRail, undefined, this);
     this.physics.add.collider(this.balls, this.bumperGroup, this.hitBumper, undefined, this);
     this.physics.add.collider(this.balls, this.spinnerNodeGroup, this.hitBumper, undefined, this);
-    this.physics.add.overlap(this.balls, this.bucket, this.catchBall, undefined, this);
     this.trajectory = this.add.graphics().setDepth(4);
     this.createCannon();
     this.refreshHud();
@@ -519,26 +524,42 @@ class PegFanScene extends Phaser.Scene {
     this.brickGroup = this.physics.add.staticGroup();
     this.level.bricks.forEach((data) => {
       const color = data.type === 'orange' ? COLORS.orange : data.type === 'green' ? COLORS.green : COLORS.blue;
-      const brick = this.add.rectangle(data.x, data.y, data.w, data.h, color, 1).setStrokeStyle(3, 0xffffff, 0.28);
-      brick.rotation = data.angle;
-      brick.pegType = data.type;
-      brick.value = data.type === 'orange' ? 450 : data.type === 'green' ? 220 : 120;
-      this.physics.add.existing(brick, true);
-      brick.body.setSize(data.w, data.h);
-      brick.body.updateFromGameObject();
-      this.brickGroup.add(brick);
+      const visual = this.add.rectangle(data.x, data.y, data.w, data.h, color, 1).setStrokeStyle(3, 0xffffff, 0.28);
+      visual.rotation = data.angle;
+      this.blockVisuals.push(visual);
+      this.blockColliders.push({
+        id: `brick-${this.blockColliders.length}`,
+        kind: 'brick',
+        visual,
+        active: true,
+        x: data.x,
+        y: data.y,
+        w: data.w,
+        h: data.h,
+        angle: data.angle,
+        pegType: data.type,
+        value: data.type === 'orange' ? 450 : data.type === 'green' ? 220 : 120,
+      });
     });
   }
 
   createRails() {
     this.railGroup = this.physics.add.staticGroup();
     this.level.rails.forEach((data) => {
-      const rail = this.add.rectangle(data.x, data.y, data.w, data.h, 0x8ea2c7, 0.35).setStrokeStyle(2, 0xdbeafe, 0.45);
-      rail.rotation = data.angle;
-      this.physics.add.existing(rail, true);
-      rail.body.setSize(data.w, data.h);
-      rail.body.updateFromGameObject();
-      this.railGroup.add(rail);
+      const visual = this.add.rectangle(data.x, data.y, data.w, data.h, 0x8ea2c7, 0.35).setStrokeStyle(2, 0xdbeafe, 0.45);
+      visual.rotation = data.angle;
+      this.blockVisuals.push(visual);
+      this.blockColliders.push({
+        id: `rail-${this.blockColliders.length}`,
+        kind: 'rail',
+        visual,
+        active: true,
+        x: data.x,
+        y: data.y,
+        w: data.w,
+        h: data.h,
+        angle: data.angle,
+      });
     });
   }
 
@@ -583,9 +604,17 @@ class PegFanScene extends Phaser.Scene {
   }
 
   createBucket() {
-    this.bucket = this.add.rectangle(WIDTH / 2, HEIGHT - 74, 158, 36, 0x202a3d, 1).setStrokeStyle(4, COLORS.gold);
-    this.physics.add.existing(this.bucket);
-    this.bucket.body.setAllowGravity(false).setImmovable(true);
+    this.add.rectangle(WIDTH / 2, HEIGHT - 74, WIDTH - 130, 4, 0x6b7280, 0.28).setDepth(1);
+    this.bucketVisual = this.add.container(WIDTH / 2, HEIGHT - 74).setDepth(8);
+    this.bucketVisual.add(this.add.rectangle(0, 0, 172, 44, 0x121b2b, 1).setStrokeStyle(4, COLORS.gold, 1));
+    this.bucketVisual.add(this.add.rectangle(0, -16, 138, 12, 0xffd35a, 0.9));
+    this.bucketVisual.add(this.add.text(0, 4, 'FREE BALL', {
+      fontFamily: 'Verdana',
+      fontSize: 18,
+      fontStyle: '700',
+      color: '#ffd35a',
+    }).setOrigin(0.5));
+    this.bucket = this.add.zone(WIDTH / 2, HEIGHT - 94, 164, 92);
     this.bucketDirection = 1;
   }
 
@@ -672,11 +701,8 @@ class PegFanScene extends Phaser.Scene {
     this.pegGroup?.getChildren().forEach((peg) => addCircle(peg, 18));
     this.bumperGroup?.getChildren().forEach((bumper) => addCircle(bumper, (bumper.radius ?? 24) + 6));
     this.spinnerNodeGroup?.getChildren().forEach((node) => addCircle(node, (node.radius ?? 14) + 6));
-    this.brickGroup?.getChildren().forEach((rect) => {
-      if (rect?.active && rect.visible !== false) rects.push({ x: rect.x, y: rect.y, w: rect.width + 16, h: rect.height + 16 });
-    });
-    this.railGroup?.getChildren().forEach((rect) => {
-      if (rect?.active && rect.visible !== false) rects.push({ x: rect.x, y: rect.y, w: rect.width + 16, h: rect.height + 16 });
+    this.blockColliders?.forEach((block) => {
+      if (block.active) rects.push({ x: block.x, y: block.y, w: block.w + 18, h: block.h + 18, angle: block.angle });
     });
     this.timedBlockGroup?.getChildren().forEach((rect) => {
       if (rect?.active && rect.visible !== false && rect.body?.enable !== false) rects.push({ x: rect.x, y: rect.y, w: rect.width + 16, h: rect.height + 16 });
@@ -692,11 +718,22 @@ class PegFanScene extends Phaser.Scene {
       if (d < circle.r) return { nx: dx / (d || 1), ny: dy / (d || 1) };
     }
     for (const rect of predictors.rects) {
-      if (Math.abs(x - rect.x) < rect.w / 2 && Math.abs(y - rect.y) < rect.h / 2) {
-        const dx = (x - rect.x) / rect.w;
-        const dy = (y - rect.y) / rect.h;
-        if (Math.abs(dx) > Math.abs(dy)) return { nx: Math.sign(dx) || 1, ny: 0 };
-        return { nx: 0, ny: Math.sign(dy) || 1 };
+      const angle = rect.angle ?? 0;
+      const cos = Math.cos(-angle);
+      const sin = Math.sin(-angle);
+      const dx = x - rect.x;
+      const dy = y - rect.y;
+      const lx = dx * cos - dy * sin;
+      const ly = dx * sin + dy * cos;
+      if (Math.abs(lx) < rect.w / 2 && Math.abs(ly) < rect.h / 2) {
+        const localNx = Math.abs(lx / rect.w) > Math.abs(ly / rect.h) ? Math.sign(lx) || 1 : 0;
+        const localNy = localNx === 0 ? Math.sign(ly) || 1 : 0;
+        const worldCos = Math.cos(angle);
+        const worldSin = Math.sin(angle);
+        return {
+          nx: localNx * worldCos - localNy * worldSin,
+          ny: localNx * worldSin + localNy * worldCos,
+        };
       }
     }
     return null;
@@ -708,6 +745,81 @@ class PegFanScene extends Phaser.Scene {
       x: (vx - 2 * dot * nx) * bounce,
       y: (vy - 2 * dot * ny) * bounce,
     };
+  }
+
+  collideBallWithOrientedBlock(ball, block) {
+    if (!ball?.active || !ball.body || !block.active) return false;
+    const radius = ball.radius ?? 11;
+    const cos = Math.cos(-block.angle);
+    const sin = Math.sin(-block.angle);
+    const dx = ball.x - block.x;
+    const dy = ball.y - block.y;
+    const localX = dx * cos - dy * sin;
+    const localY = dx * sin + dy * cos;
+    const halfW = block.w / 2;
+    const halfH = block.h / 2;
+    const closestX = Phaser.Math.Clamp(localX, -halfW, halfW);
+    const closestY = Phaser.Math.Clamp(localY, -halfH, halfH);
+    const diffX = localX - closestX;
+    const diffY = localY - closestY;
+    const distSq = diffX * diffX + diffY * diffY;
+    if (distSq > radius * radius) return false;
+
+    let localNx = diffX;
+    let localNy = diffY;
+    const dist = Math.sqrt(distSq);
+    if (dist > 0.0001) {
+      localNx /= dist;
+      localNy /= dist;
+    } else {
+      const penX = halfW - Math.abs(localX);
+      const penY = halfH - Math.abs(localY);
+      if (penX < penY) {
+        localNx = Math.sign(localX) || 1;
+        localNy = 0;
+      } else {
+        localNx = 0;
+        localNy = Math.sign(localY) || 1;
+      }
+    }
+
+    const worldCos = Math.cos(block.angle);
+    const worldSin = Math.sin(block.angle);
+    const nx = localNx * worldCos - localNy * worldSin;
+    const ny = localNx * worldSin + localNy * worldCos;
+    const reflected = this.reflectVelocity(ball.body.velocity.x, ball.body.velocity.y, nx, ny, 0.94);
+    ball.x += nx * Math.max(2, radius - dist + 1);
+    ball.y += ny * Math.max(2, radius - dist + 1);
+    ball.body.velocity.set(reflected.x, reflected.y);
+
+    if (block.kind === 'brick') this.hitBlock(ball, block);
+    else this.playSfx('bumper', { volume: 0.38 });
+    return true;
+  }
+
+  hitBlock(ball, block) {
+    if (!block.active) return;
+    block.active = false;
+    this.score += block.value;
+    if (block.pegType === 'orange') this.targetsLeft -= 1;
+    if (block.pegType === 'green') this.multiballQueued = true;
+    this.playSfx(block.pegType === 'orange' ? 'orange' : block.pegType === 'green' ? 'green' : 'peg', { volume: 0.6 });
+    this.burst(block.x, block.y, block.pegType === 'orange' ? COLORS.orange : block.pegType === 'green' ? COLORS.green : COLORS.blue);
+    this.popText(block.x, block.y - 20, `+${block.value}`, block.pegType === 'orange' ? '#ffb088' : '#dbeafe');
+    this.tweens.add({
+      targets: block.visual,
+      scale: 1.12,
+      alpha: 0,
+      duration: 180,
+      ease: 'Cubic.easeOut',
+      onComplete: () => block.visual.destroy(),
+    });
+    this.refreshHud();
+    if (this.multiballQueued && this.inFlight === 1) {
+      this.multiballQueued = false;
+      this.spawnBall(ball.x, ball.y, -ball.body.velocity.x * 0.7, ball.body.velocity.y * 0.8);
+    }
+    if (this.targetsLeft <= 0) this.clearLevel();
   }
 
   launchBall(pointer = this.input.activePointer) {
@@ -823,6 +935,24 @@ class PegFanScene extends Phaser.Scene {
   }
 
   hitPeg(ball, peg) {
+    if (peg.blockShared) {
+      if (peg.blockShared.hit) return;
+      peg.blockShared.hit = true;
+      peg.blockShared.nodes.forEach((node) => {
+        if (node !== peg) {
+          node.hit = true;
+          this.brickGroup.remove(node, true, true);
+        }
+      });
+      this.tweens.add({
+        targets: peg.blockShared.visual,
+        scale: 1.12,
+        alpha: 0,
+        duration: 180,
+        ease: 'Cubic.easeOut',
+        onComplete: () => peg.blockShared.visual.destroy(),
+      });
+    }
     if (peg.hit) return;
     peg.hit = true;
     this.reflectBallFrom(ball, peg.x, peg.y, 500, 1.02);
@@ -858,8 +988,17 @@ class PegFanScene extends Phaser.Scene {
     this.refreshHud();
   }
 
-  catchBall(objectA, objectB) {
-    const ball = this.balls?.contains(objectA) ? objectA : this.balls?.contains(objectB) ? objectB : null;
+  isBallInBucket(ball) {
+    if (!ball?.active || !this.bucket?.active || !ball.body) return false;
+    const halfW = this.bucket.width / 2;
+    const halfH = this.bucket.height / 2;
+    const withinX = Math.abs(ball.x - this.bucket.x) <= halfW;
+    const withinY = Math.abs(ball.y - this.bucket.y) <= halfH;
+    const descending = ball.body.velocity.y > 0;
+    return withinX && withinY && descending;
+  }
+
+  catchBall(ball) {
     if (!ball || ball === this.bucket) return;
     if (ball.caught) return;
     ball.caught = true;
@@ -1041,10 +1180,10 @@ class PegFanScene extends Phaser.Scene {
   update(time, delta) {
     if (this.view !== 'game') return;
     const dt = delta / 1000;
-    if (this.bucket?.active && this.bucket.body) {
+    if (this.bucket?.active) {
       this.bucket.x += this.bucketDirection * this.level.bucketSpeed * dt;
       if (this.bucket.x < 120 || this.bucket.x > WIDTH - 120) this.bucketDirection *= -1;
-      this.bucket.body.updateFromGameObject?.();
+      this.bucketVisual?.setPosition(this.bucket.x, this.bucket.y);
     }
     this.updateStageGimmicks(time);
 
@@ -1064,6 +1203,13 @@ class PegFanScene extends Phaser.Scene {
       if (ball.y > HEIGHT + 90) {
         this.removeBall(ball);
         return;
+      }
+      if (this.isBallInBucket(ball)) {
+        this.catchBall(ball);
+        return;
+      }
+      for (const block of this.blockColliders ?? []) {
+        if (this.collideBallWithOrientedBlock(ball, block)) break;
       }
       const speed = Math.hypot(ball.body.velocity.x, ball.body.velocity.y);
       if (speed < 55 && ball.y < HEIGHT - 120) {
