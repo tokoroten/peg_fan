@@ -4,7 +4,13 @@ import './styles.css';
 const WIDTH = 900;
 const HEIGHT = 1300;
 const TOTAL_LEVELS = 100;
+const REWARD_COUNT = 100;
 const SAVE_KEY = 'peg-fan-save-v1';
+const CANNON_X = WIDTH / 2;
+const CANNON_Y = 168;
+const LAUNCH_SPEED = 660;
+const MIN_AIM_ANGLE = 0.28;
+const MAX_AIM_ANGLE = Math.PI - 0.28;
 const CHARACTER_ASSETS = [
   'assets/characters/character-1.svg',
   'assets/characters/character-2.svg',
@@ -12,14 +18,28 @@ const CHARACTER_ASSETS = [
   'assets/characters/character-4.svg',
   'assets/characters/character-5.svg',
 ];
+const REWARD_ASSETS = Array.from({ length: REWARD_COUNT }, (_, index) => (
+  index === 0 ? 'assets/premium/reward-premium-001.png' : `assets/rewards/reward-${String(index + 1).padStart(3, '0')}.svg`
+));
+const SOUND_ASSETS = {
+  launch: 'assets/audio/launch.wav',
+  peg: 'assets/audio/peg.wav',
+  orange: 'assets/audio/orange.wav',
+  green: 'assets/audio/green.wav',
+  bumper: 'assets/audio/bumper.wav',
+  catch: 'assets/audio/catch.wav',
+  clear: 'assets/audio/clear.wav',
+  fail: 'assets/audio/fail.wav',
+  reward: 'assets/audio/reward.wav',
+};
 
 const COLORS = {
   panel: 0x141b2a,
   panel2: 0x202a3d,
   text: '#f6f8fc',
   muted: '#aab5c8',
-  gold: '#ffd35a',
-  cyan: '#34d3e5',
+  gold: 0xffd35a,
+  cyan: 0x34d3e5,
   orange: 0xff7a45,
   blue: 0x49a9ff,
   green: 0x52e391,
@@ -119,16 +139,25 @@ class PegFanScene extends Phaser.Scene {
 
   preload() {
     CHARACTER_ASSETS.forEach((path, index) => this.load.image(`character-${index + 1}`, path));
+    REWARD_ASSETS.forEach((path, index) => this.load.image(`reward-${index + 1}`, path));
+    Object.entries(SOUND_ASSETS).forEach(([key, path]) => this.load.audio(`sfx-${key}`, path));
   }
 
   create() {
     this.save = loadSave();
     this.physics.world.setBounds(36, 0, WIDTH - 72, HEIGHT + 180);
     this.physics.world.setBoundsCollision(true, true, true, false);
-    this.input.on('pointerdown', () => this.launchBall());
     this.input.keyboard?.on('keydown-SPACE', () => this.launchBall());
     this.input.keyboard?.on('keydown-ESC', () => this.showMenu());
     this.showMenu();
+  }
+
+  playSfx(key, config = {}) {
+    try {
+      this.sound.play(`sfx-${key}`, { volume: 0.72, ...config });
+    } catch {
+      // Browsers can block audio until the first trusted gesture; gameplay continues silently.
+    }
   }
 
   clearScene() {
@@ -169,8 +198,14 @@ class PegFanScene extends Phaser.Scene {
       rect.setInteractive({ useHandCursor: true })
         .on('pointerover', () => rect.setFillStyle(opts.hover ?? 0x2a3750))
         .on('pointerout', () => rect.setFillStyle(fill))
-        .on('pointerdown', onClick);
-      text.setInteractive({ useHandCursor: true }).on('pointerdown', onClick);
+        .on('pointerdown', (pointer, localX, localY, event) => {
+          event?.stopPropagation();
+          onClick();
+        });
+      text.setInteractive({ useHandCursor: true }).on('pointerdown', (pointer, localX, localY, event) => {
+        event?.stopPropagation();
+        onClick();
+      });
     }
     return { rect, text };
   }
@@ -182,10 +217,10 @@ class PegFanScene extends Phaser.Scene {
     this.add.text(54, 124, '100 STAGE PEG PUZZLE', {
       fontFamily: 'Verdana',
       fontSize: 22,
-      color: COLORS.gold,
+      color: '#ffd35a',
       fontStyle: '700',
     });
-    this.add.text(54, 178, '狙って撃ち、オレンジペグをすべて消す。\n20ステージごとにギャラリーが解放されます。', {
+    this.add.text(54, 178, '狙って撃ち、オレンジペグをすべて消す。\nステージクリアごとにご褒美イラストが1枚解放されます。', {
       fontFamily: 'Meiryo, Verdana',
       fontSize: 24,
       color: COLORS.muted,
@@ -211,19 +246,20 @@ class PegFanScene extends Phaser.Scene {
     this.add.rectangle(450, 715, 792, 430, 0x111827, 0.9).setStrokeStyle(2, 0x2f3a4d);
     this.add.text(86, 534, 'PROGRESS', { fontFamily: 'Verdana', fontSize: 28, fontStyle: '700', color: COLORS.text });
     this.add.text(86, 590, `解放ステージ: ${this.save.unlockedLevel} / ${TOTAL_LEVELS}`, { fontFamily: 'Meiryo, Verdana', fontSize: 28, color: COLORS.text });
-    this.add.text(86, 638, `閲覧可能イラスト: ${this.save.galleryUnlocked} / 5`, { fontFamily: 'Meiryo, Verdana', fontSize: 28, color: COLORS.text });
+    this.add.text(86, 638, `閲覧可能イラスト: ${this.save.galleryUnlocked} / ${REWARD_COUNT}`, { fontFamily: 'Meiryo, Verdana', fontSize: 28, color: COLORS.text });
     const barX = 86;
     const barY = 710;
     this.add.rectangle(barX + 335, barY, 670, 28, 0x253044);
     this.add.rectangle(barX, barY, 670 * ((this.save.unlockedLevel - 1) / TOTAL_LEVELS), 28, COLORS.gold).setOrigin(0, 0.5);
     for (let i = 0; i < 5; i += 1) {
-      const unlocked = i < this.save.galleryUnlocked;
-      this.add.image(162 + i * 145, 875, `character-${i + 1}`).setDisplaySize(104, 150).setAlpha(unlocked ? 1 : 0.25);
-      this.add.text(112 + i * 145, 970, unlocked ? 'OPEN' : `L${(i + 1) * 20}`, {
+      const rewardIndex = Math.min(REWARD_COUNT - 1, Math.max(0, this.save.galleryUnlocked - 5 + i));
+      const unlocked = rewardIndex < this.save.galleryUnlocked;
+      this.add.image(162 + i * 145, 875, `reward-${rewardIndex + 1}`).setDisplaySize(104, 150).setAlpha(unlocked ? 1 : 0.25);
+      this.add.text(112 + i * 145, 970, unlocked ? `L${rewardIndex + 1}` : `L${i + 1}`, {
         fontFamily: 'Verdana',
         fontSize: 18,
         fontStyle: '700',
-        color: unlocked ? COLORS.gold : '#69758c',
+        color: unlocked ? '#ffd35a' : '#69758c',
       });
     }
   }
@@ -254,22 +290,56 @@ class PegFanScene extends Phaser.Scene {
     this.clearScene();
     this.addBackground('GALLERY');
     this.button(756, 72, 190, 52, '戻る', () => this.showMenu(), { size: 21 });
-    this.add.text(54, 124, '20ステージごとに1枚解放。\n画像は public/assets/characters の同名ファイル差し替えで更新できます。', {
+    this.add.text(54, 124, '各ステージクリアで1枚解放。画像は public/assets/rewards の同名ファイル差し替えで更新できます。', {
       fontFamily: 'Meiryo, Verdana',
       fontSize: 21,
       color: COLORS.muted,
       wordWrap: { width: 790 },
     });
-    for (let i = 0; i < 5; i += 1) {
-      const x = 155 + (i % 3) * 295;
-      const y = i < 3 ? 475 : 900;
+    for (let i = 0; i < REWARD_COUNT; i += 1) {
+      const col = i % 10;
+      const row = Math.floor(i / 10);
+      const x = 82 + col * 82;
+      const y = 205 + row * 96;
       const unlocked = i < this.save.galleryUnlocked || this.save.clearedAll;
-      this.add.rectangle(x, y, 236, 340, 0x111827, 0.92).setStrokeStyle(2, unlocked ? COLORS.gold : 0x3b4658);
-      this.add.image(x, y - 14, `character-${i + 1}`).setDisplaySize(200, 289).setAlpha(unlocked ? 1 : 0.18);
-      if (!unlocked) {
-        this.add.text(x, y, `LEVEL ${(i + 1) * 20}`, { fontFamily: 'Verdana', fontSize: 28, fontStyle: '700', color: '#768299' }).setOrigin(0.5);
+      const tile = this.add.rectangle(x, y, 68, 86, 0x111827, 0.94).setStrokeStyle(2, unlocked ? COLORS.gold : 0x3b4658);
+      this.add.image(x, y - 7, `reward-${i + 1}`).setDisplaySize(54, 78).setAlpha(unlocked ? 1 : 0.14);
+      this.add.text(x, y + 45, `${i + 1}`, {
+        fontFamily: 'Verdana',
+        fontSize: 13,
+        fontStyle: '700',
+        color: unlocked ? '#ffd35a' : '#69758c',
+      }).setOrigin(0.5);
+      if (unlocked) {
+        tile.setInteractive({ useHandCursor: true }).on('pointerdown', (pointer, localX, localY, event) => {
+          event?.stopPropagation();
+          this.showRewardViewer(i + 1, 'gallery');
+        });
       }
     }
+  }
+
+  showRewardViewer(rewardNumber, returnTo = 'gallery') {
+    this.view = 'reward';
+    const overlay = this.add.container(0, 0).setDepth(80);
+    this.rewardOverlay = overlay;
+    overlay.add(this.add.rectangle(WIDTH / 2, HEIGHT / 2, 760, 1120, 0x070b12, 0.98).setStrokeStyle(2, COLORS.gold));
+    overlay.add(this.add.text(WIDTH / 2, 96, `REWARD ${rewardNumber}`, {
+      fontFamily: 'Verdana',
+      fontSize: 44,
+      fontStyle: '700',
+      color: '#ffd35a',
+    }).setOrigin(0.5));
+    overlay.add(this.add.image(WIDTH / 2, 630, `reward-${rewardNumber}`).setDisplaySize(560, 809));
+    const close = this.button(WIDTH / 2, 1188, 260, 58, returnTo === 'game' ? '続ける' : '閉じる', () => {
+      overlay.destroy(true);
+      if (returnTo === 'game') {
+        this.view = 'result';
+      } else {
+        this.showGallery();
+      }
+    }, { fill: 0x4a3d21, stroke: COLORS.gold, size: 22 });
+    overlay.add([close.rect, close.text]);
   }
 
   startLevel(levelNumber) {
@@ -283,8 +353,10 @@ class PegFanScene extends Phaser.Scene {
     this.multiballQueued = false;
     this.rewardedContinuesUsed = 0;
     this.levelCleared = false;
+    this.currentAim = { x: 0, y: 1 };
 
     this.addBackground(`LEVEL ${levelNumber}`);
+    this.createAimControls();
     this.createGameUi();
     this.createBucket();
     this.createPegs();
@@ -293,9 +365,17 @@ class PegFanScene extends Phaser.Scene {
     this.physics.add.collider(this.balls, this.pegGroup, this.hitPeg, undefined, this);
     this.physics.add.collider(this.balls, this.bumperGroup, this.hitBumper, undefined, this);
     this.physics.add.overlap(this.balls, this.bucket, this.catchBall, undefined, this);
-    this.aimLine = this.add.line(0, 0, WIDTH / 2, 168, WIDTH / 2, 168, COLORS.gold, 0.78).setLineWidth(4, 2);
-    this.cannon = this.add.triangle(WIDTH / 2, 168, -30, 24, 30, 24, 0, -42, COLORS.gold).setStrokeStyle(3, 0x7a5d10);
+    this.trajectory = this.add.graphics();
+    this.aimLine = this.add.line(0, 0, CANNON_X, CANNON_Y, CANNON_X, CANNON_Y + 220, COLORS.gold, 0.78).setLineWidth(4, 2);
+    this.cannon = this.add.triangle(CANNON_X, CANNON_Y, -30, 24, 30, 24, 0, -42, COLORS.gold).setStrokeStyle(3, 0x7a5d10);
     this.refreshHud();
+  }
+
+  createAimControls() {
+    this.aimZone = this.add.zone(WIDTH / 2, HEIGHT / 2 + 112, WIDTH - 84, HEIGHT - 300)
+      .setInteractive({ useHandCursor: true });
+    this.aimZone.on('pointerdown', (pointer) => this.launchBall(pointer));
+    this.aimZone.on('pointermove', (pointer) => this.updateAimFromPointer(pointer));
   }
 
   createGameUi() {
@@ -339,35 +419,174 @@ class PegFanScene extends Phaser.Scene {
     this.goalText.setText('オレンジペグをすべて消す');
   }
 
-  launchBall() {
+  getPointerWorld(pointer = this.input.activePointer) {
+    const camera = this.cameras.main;
+    if (pointer?.positionToCamera) {
+      return pointer.positionToCamera(camera);
+    }
+    return { x: pointer?.worldX ?? CANNON_X, y: pointer?.worldY ?? CANNON_Y + 260 };
+  }
+
+  calculateAim(pointer = this.input.activePointer) {
+    const world = this.getPointerWorld(pointer);
+    const dx = Phaser.Math.Clamp(world.x - CANNON_X, -560, 560);
+    const dy = Phaser.Math.Clamp(world.y - CANNON_Y, 80, 980);
+    let angle = Math.atan2(dy, dx);
+    angle = Phaser.Math.Clamp(angle, MIN_AIM_ANGLE, MAX_AIM_ANGLE);
+    return {
+      x: Math.cos(angle),
+      y: Math.sin(angle),
+      angle,
+    };
+  }
+
+  updateAimFromPointer(pointer = this.input.activePointer) {
+    if (this.view !== 'game') return;
+    this.currentAim = this.calculateAim(pointer);
+  }
+
+  drawTrajectory() {
+    if (!this.trajectory || !this.currentAim) return;
+    this.trajectory.clear();
+    if (this.inFlight > 0 || this.shotsLeft <= 0) return;
+    this.trajectory.fillStyle(COLORS.gold, 0.54);
+    let x = CANNON_X;
+    let y = CANNON_Y;
+    let vx = this.currentAim.x * LAUNCH_SPEED;
+    let vy = this.currentAim.y * LAUNCH_SPEED;
+    const gravity = 760;
+    const step = 1 / 18;
+    for (let i = 1; i <= 26; i += 1) {
+      x += vx * step;
+      y += vy * step;
+      vy += gravity * step;
+      if (x < 47 || x > WIDTH - 47) {
+        vx *= -0.94;
+        x = Phaser.Math.Clamp(x, 47, WIDTH - 47);
+      }
+      if (y > HEIGHT - 86) break;
+      const alpha = Phaser.Math.Clamp(0.62 - i * 0.017, 0.12, 0.62);
+      this.trajectory.fillStyle(COLORS.gold, alpha);
+      this.trajectory.fillCircle(x, y, Math.max(2.4, 6 - i * 0.1));
+    }
+  }
+
+  launchBall(pointer = this.input.activePointer) {
     if (this.view !== 'game' || this.inFlight > 0 || this.shotsLeft <= 0) return;
-    const pointer = this.input.activePointer;
-    const dx = Phaser.Math.Clamp(pointer.worldX - WIDTH / 2, -430, 430);
-    const dy = Phaser.Math.Clamp(pointer.worldY - 168, 120, 900);
-    const len = Math.max(1, Math.hypot(dx, dy));
-    this.spawnBall(WIDTH / 2, 168, (dx / len) * 610, (dy / len) * 610);
+    this.currentAim = this.calculateAim(pointer);
+    this.spawnBall(
+      CANNON_X + this.currentAim.x * 22,
+      CANNON_Y + this.currentAim.y * 22,
+      this.currentAim.x * LAUNCH_SPEED,
+      this.currentAim.y * LAUNCH_SPEED,
+    );
+    this.flashLaunch();
+    this.playSfx('launch', { volume: 0.55 });
     this.shotsLeft -= 1;
     this.refreshHud();
+  }
+
+  flashLaunch() {
+    const ring = this.add.circle(
+      CANNON_X + this.currentAim.x * 34,
+      CANNON_Y + this.currentAim.y * 34,
+      14,
+      COLORS.gold,
+      0.34,
+    ).setStrokeStyle(3, COLORS.gold, 0.8);
+    this.tweens.add({
+      targets: ring,
+      scale: 2.4,
+      alpha: 0,
+      duration: 260,
+      ease: 'Cubic.easeOut',
+      onComplete: () => ring.destroy(),
+    });
+  }
+
+  burst(x, y, color = COLORS.gold) {
+    for (let i = 0; i < 8; i += 1) {
+      const angle = (i / 8) * Math.PI * 2;
+      const dot = this.add.circle(x, y, 4, color, 0.86);
+      this.tweens.add({
+        targets: dot,
+        x: x + Math.cos(angle) * 34,
+        y: y + Math.sin(angle) * 34,
+        alpha: 0,
+        scale: 0.35,
+        duration: 310,
+        ease: 'Cubic.easeOut',
+        onComplete: () => dot.destroy(),
+      });
+    }
+  }
+
+  popText(x, y, label, color = '#ffd35a') {
+    const text = this.add.text(x, y, label, {
+      fontFamily: 'Verdana',
+      fontSize: 22,
+      fontStyle: '700',
+      color,
+    }).setOrigin(0.5).setDepth(20);
+    this.tweens.add({
+      targets: text,
+      y: y - 38,
+      alpha: 0,
+      duration: 650,
+      ease: 'Cubic.easeOut',
+      onComplete: () => text.destroy(),
+    });
+  }
+
+  reflectBallFrom(ball, x, y, minSpeed = 520, boost = 1.04) {
+    let vx = ball.body.velocity.x;
+    let vy = ball.body.velocity.y;
+    if (Math.hypot(vx, vy) < 80) {
+      vx = this.currentAim.x * LAUNCH_SPEED;
+      vy = this.currentAim.y * LAUNCH_SPEED;
+    }
+    let nx = ball.x - x;
+    let ny = ball.y - y;
+    const normalLength = Math.hypot(nx, ny) || 1;
+    nx /= normalLength;
+    ny /= normalLength;
+    const dot = vx * nx + vy * ny;
+    let rvx = (vx - 2 * dot * nx) * boost;
+    let rvy = (vy - 2 * dot * ny) * boost;
+    const speed = Math.hypot(rvx, rvy) || 1;
+    if (speed < minSpeed) {
+      const scale = minSpeed / speed;
+      rvx *= scale;
+      rvy *= scale;
+    }
+    this.time.delayedCall(0, () => {
+      if (!ball.active || !ball.body) return;
+      ball.body.velocity.set(rvx, rvy);
+    });
   }
 
   spawnBall(x, y, vx, vy) {
     const ball = this.add.circle(x, y, 11, 0xffffff, 1).setStrokeStyle(3, COLORS.gold);
     this.physics.add.existing(ball);
+    this.balls.add(ball);
     ball.body.setCircle(11);
     ball.body.setBounce(0.94, 0.94);
     ball.body.setDrag(3, 0);
-    ball.body.setVelocity(vx, vy);
     ball.body.setCollideWorldBounds(true);
-    this.balls.add(ball);
+    ball.body.velocity.set(vx, vy);
     this.inFlight += 1;
   }
 
   hitPeg(ball, peg) {
     if (peg.hit) return;
     peg.hit = true;
+    this.reflectBallFrom(ball, peg.x, peg.y, 500, 1.02);
     this.score += peg.value;
     if (peg.pegType === 'orange') this.targetsLeft -= 1;
     if (peg.pegType === 'green') this.multiballQueued = true;
+    this.playSfx(peg.pegType === 'orange' ? 'orange' : peg.pegType === 'green' ? 'green' : 'peg', { volume: peg.pegType === 'orange' ? 0.72 : 0.58 });
+    this.burst(peg.x, peg.y, peg.fillColor ?? COLORS.gold);
+    this.popText(peg.x, peg.y - 20, `+${peg.value}`, peg.pegType === 'orange' ? '#ffb088' : '#dbeafe');
     this.tweens.add({
       targets: peg,
       scale: 1.85,
@@ -378,7 +597,6 @@ class PegFanScene extends Phaser.Scene {
         this.pegGroup.remove(peg, true, true);
       },
     });
-    ball.body.velocity.scale(1.04);
     if (this.multiballQueued && this.inFlight === 1) {
       this.multiballQueued = false;
       this.spawnBall(ball.x, ball.y, -ball.body.velocity.x * 0.7, ball.body.velocity.y * 0.8);
@@ -389,7 +607,9 @@ class PegFanScene extends Phaser.Scene {
 
   hitBumper(ball) {
     this.score += 35;
-    ball.body.velocity.scale(1.08);
+    this.reflectBallFrom(ball, ball.x, ball.y - 1, 620, 1.12);
+    this.playSfx('bumper', { volume: 0.5 });
+    this.burst(ball.x, ball.y, COLORS.cyan);
     this.refreshHud();
   }
 
@@ -398,6 +618,8 @@ class PegFanScene extends Phaser.Scene {
     ball.caught = true;
     this.shotsLeft += 1;
     this.score += 250;
+    this.playSfx('catch', { volume: 0.7 });
+    this.popText(this.bucket.x, this.bucket.y - 42, '+1 BALL', '#ffd35a');
     this.removeBall(ball);
     this.refreshHud();
   }
@@ -414,16 +636,18 @@ class PegFanScene extends Phaser.Scene {
     const level = this.level.level;
     if (!this.save.completedLevels.includes(level)) this.save.completedLevels.push(level);
     this.save.unlockedLevel = Math.min(TOTAL_LEVELS, Math.max(this.save.unlockedLevel, level + 1));
-    this.save.galleryUnlocked = Math.max(this.save.galleryUnlocked, Math.min(5, Math.floor(level / 20)));
+    this.save.galleryUnlocked = Math.max(this.save.galleryUnlocked, Math.min(REWARD_COUNT, level));
     if (level >= TOTAL_LEVELS) {
       this.save.clearedAll = true;
-      this.save.galleryUnlocked = 5;
+      this.save.galleryUnlocked = REWARD_COUNT;
     }
     saveProgress(this.save);
+    this.playSfx('clear', { volume: 0.82 });
     this.time.delayedCall(550, () => this.showResult(true));
   }
 
   failLevel() {
+    this.playSfx('fail', { volume: 0.72 });
     this.time.delayedCall(450, () => this.showResult(false));
   }
 
@@ -432,19 +656,38 @@ class PegFanScene extends Phaser.Scene {
     this.resultOverlay?.destroy(true);
     const level = this.level.level;
     const canContinue = !success && this.rewardedContinuesUsed < 1;
+    const panelHeight = success ? 1060 : canContinue ? 520 : 430;
+    const titleY = success ? 176 : HEIGHT / 2 - 180;
+    const scoreY = success ? 238 : HEIGHT / 2 - 106;
     this.resultOverlay = this.add.container(0, 0).setDepth(50);
-    this.resultOverlay.add(this.add.rectangle(WIDTH / 2, HEIGHT / 2, 720, canContinue ? 520 : 430, 0x0e1420, 0.96).setStrokeStyle(2, success ? COLORS.gold : COLORS.red));
-    this.resultOverlay.add(this.add.text(WIDTH / 2, HEIGHT / 2 - 180, success ? 'STAGE CLEAR' : 'OUT OF BALLS', {
+    this.resultOverlay.add(this.add.rectangle(WIDTH / 2, HEIGHT / 2, 720, panelHeight, 0x0e1420, 0.96).setStrokeStyle(2, success ? COLORS.gold : COLORS.red));
+    this.resultOverlay.add(this.add.text(WIDTH / 2, titleY, success ? 'STAGE CLEAR' : 'OUT OF BALLS', {
       fontFamily: 'Verdana',
       fontSize: 48,
       fontStyle: '700',
-      color: success ? COLORS.gold : '#ff8ba6',
+      color: success ? '#ffd35a' : '#ff8ba6',
     }).setOrigin(0.5));
-    this.resultOverlay.add(this.add.text(WIDTH / 2, HEIGHT / 2 - 106, `SCORE ${this.score}   TARGET ${this.targetsLeft}`, {
+    this.resultOverlay.add(this.add.text(WIDTH / 2, scoreY, `SCORE ${this.score}   TARGET ${this.targetsLeft}`, {
       fontFamily: 'Verdana',
       fontSize: 30,
       color: COLORS.text,
     }).setOrigin(0.5));
+
+    if (success) {
+      const rewardNumber = Phaser.Math.Clamp(level, 1, REWARD_COUNT);
+      this.resultOverlay.add(this.add.text(WIDTH / 2, 300, `LEVEL ${rewardNumber} REWARD UNLOCKED`, {
+        fontFamily: 'Verdana',
+        fontSize: 22,
+        fontStyle: '700',
+        color: '#ffd35a',
+      }).setOrigin(0.5));
+      this.resultOverlay.add(this.add.image(WIDTH / 2, 626, `reward-${rewardNumber}`).setDisplaySize(390, 563));
+      const expand = this.button(WIDTH / 2, 938, 320, 54, 'ご褒美を見る', () => {
+        this.playSfx('reward', { volume: 0.78 });
+        this.showRewardViewer(rewardNumber, 'game');
+      }, { fill: 0x4a3d21, stroke: COLORS.gold, size: 21 });
+      this.resultOverlay.add([expand.rect, expand.text]);
+    }
 
     if (canContinue) {
       this.resultOverlay.add(this.add.text(WIDTH / 2, HEIGHT / 2 - 54, 'ダミー動画広告を最後まで見ると、弾を3発補充して続行できます。', {
@@ -468,7 +711,7 @@ class PegFanScene extends Phaser.Scene {
     }
 
     const next = Math.min(TOTAL_LEVELS, level + 1);
-    const y = canContinue ? HEIGHT / 2 + 178 : HEIGHT / 2 + 48;
+    const y = success ? 1032 : canContinue ? HEIGHT / 2 + 178 : HEIGHT / 2 + 48;
     const retry = this.button(WIDTH / 2 - 185, y, 260, 64, success && level < TOTAL_LEVELS ? '次へ' : '再挑戦', () => this.startLevel(success && level < TOTAL_LEVELS ? next : level), { fill: 0x2c6f84 });
     const select = this.button(WIDTH / 2 + 185, y, 260, 64, '選択へ', () => this.showLevelSelect());
     const gallery = this.button(WIDTH / 2, y + 90, 300, 58, 'ギャラリー', () => this.showGallery(), { fill: 0x4a3d21, stroke: COLORS.gold });
@@ -485,12 +728,12 @@ class PegFanScene extends Phaser.Scene {
       fontFamily: 'Verdana',
       fontSize: 48,
       fontStyle: '700',
-      color: COLORS.gold,
+      color: '#ffd35a',
     }).setOrigin(0.5));
     overlay.add(this.add.text(WIDTH / 2, HEIGHT / 2 - 112, 'DUMMY PLACEMENT', {
       fontFamily: 'Verdana',
       fontSize: 24,
-      color: COLORS.cyan,
+      color: '#34d3e5',
     }).setOrigin(0.5));
     overlay.add(this.add.text(WIDTH / 2, HEIGHT / 2 - 48, 'ここに動画広告SDKのリワード広告を差し込みます。', {
       fontFamily: 'Meiryo, Verdana',
@@ -527,13 +770,14 @@ class PegFanScene extends Phaser.Scene {
     this.rewardedContinuesUsed += 1;
     this.shotsLeft += 3;
     this.score += 100;
+    this.playSfx('reward', { volume: 0.76 });
     this.view = 'game';
     this.refreshHud();
     const toast = this.add.text(WIDTH / 2, 232, '+3 BALL CONTINUE', {
       fontFamily: 'Verdana',
       fontSize: 34,
       fontStyle: '700',
-      color: COLORS.gold,
+      color: '#ffd35a',
     }).setOrigin(0.5).setDepth(60);
     this.tweens.add({
       targets: toast,
@@ -552,22 +796,35 @@ class PegFanScene extends Phaser.Scene {
     if (this.bucket.x < 120 || this.bucket.x > WIDTH - 120) this.bucketDirection *= -1;
     this.bucket.body.updateFromGameObject();
 
-    const pointer = this.input.activePointer;
-    const endX = Phaser.Math.Clamp(pointer.worldX, 70, WIDTH - 70);
-    const endY = Phaser.Math.Clamp(pointer.worldY, 290, HEIGHT - 170);
-    this.aimLine.setTo(WIDTH / 2, 168, endX, endY);
-    this.cannon.rotation = Phaser.Math.Angle.Between(WIDTH / 2, 168, endX, endY) + Math.PI / 2;
+    this.updateAimFromPointer();
+    const aimLength = 245;
+    const endX = CANNON_X + this.currentAim.x * aimLength;
+    const endY = CANNON_Y + this.currentAim.y * aimLength;
+    this.aimLine.setTo(CANNON_X, CANNON_Y, endX, endY);
+    this.cannon.rotation = this.currentAim.angle + Math.PI / 2;
+    this.drawTrajectory();
 
     this.balls?.getChildren().forEach((ball) => {
       if (ball.y > HEIGHT + 90) this.removeBall(ball);
-      if (ball.body?.speed < 80 && ball.y > 1030) {
-        ball.body.setVelocity(ball.body.velocity.x * 1.04, ball.body.velocity.y + 12);
+      const speed = ball.body ? Math.hypot(ball.body.velocity.x, ball.body.velocity.y) : 0;
+      if (speed < 55 && ball.y < HEIGHT - 120) {
+        ball.stallTime = (ball.stallTime ?? 0) + delta;
+        if (ball.stallTime > 360) {
+          const nudgeX = Phaser.Math.Clamp((ball.x - WIDTH / 2) * 1.6, -260, 260);
+          ball.body.velocity.set(nudgeX, 430);
+          ball.stallTime = 0;
+        }
+      } else {
+        ball.stallTime = 0;
+      }
+      if (speed < 80 && ball.y > 1030) {
+        ball.body.velocity.set(ball.body.velocity.x * 1.04, ball.body.velocity.y + 12);
       }
     });
   }
 }
 
-new Phaser.Game({
+const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: 'game',
   width: WIDTH,
@@ -586,3 +843,5 @@ new Phaser.Game({
   },
   scene: [PegFanScene],
 });
+
+window.pegFanGame = game;
