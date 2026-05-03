@@ -311,6 +311,7 @@ class PegFanScene extends Phaser.Scene {
     this.button(590, 300, 250, 72, 'ステージ選択', () => this.showLevelSelect());
     this.button(220, 398, 330, 72, 'ギャラリー', () => this.showGallery());
     this.button(590, 398, 250, 72, '最初から', () => this.startLevel(1), { fill: 0x4b3344 });
+    this.button(450, 1085, 360, 46, 'DEBUG: 全解放', () => this.debugUnlockAll(), { fill: 0x2b3445, stroke: 0x64748b, size: 18 });
 
     this.addProgressPanel();
     this.add.text(54, 1160, '操作: マウス/タッチで照準、クリックで発射、Spaceでも発射、Escでメニュー', {
@@ -318,6 +319,15 @@ class PegFanScene extends Phaser.Scene {
       fontSize: 20,
       color: '#95a1b8',
     });
+  }
+
+  debugUnlockAll() {
+    this.save.unlockedLevel = TOTAL_LEVELS;
+    this.save.completedLevels = Array.from({ length: TOTAL_LEVELS }, (_, index) => index + 1);
+    this.save.galleryUnlocked = REWARD_COUNT;
+    this.save.clearedAll = true;
+    saveProgress(this.save);
+    this.showMenu();
   }
 
   addProgressPanel() {
