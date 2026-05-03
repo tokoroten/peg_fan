@@ -366,7 +366,6 @@ class PegFanScene extends Phaser.Scene {
     this.physics.add.collider(this.balls, this.bumperGroup, this.hitBumper, undefined, this);
     this.physics.add.overlap(this.balls, this.bucket, this.catchBall, undefined, this);
     this.trajectory = this.add.graphics().setDepth(4);
-    this.aimLine = this.add.line(0, 0, CANNON_X, CANNON_Y, CANNON_X, CANNON_Y + 220, COLORS.gold, 0.5).setLineWidth(3, 2).setDepth(5);
     this.createCannon();
     this.refreshHud();
   }
@@ -832,9 +831,6 @@ class PegFanScene extends Phaser.Scene {
 
     this.updateAimFromPointer();
     const muzzle = this.getMuzzlePoint(78);
-    const endX = CANNON_X + this.currentAim.x * 255;
-    const endY = CANNON_Y + this.currentAim.y * 255;
-    this.aimLine.setTo(muzzle.x, muzzle.y, endX, endY);
     const barrelRotation = this.currentAim.angle - Math.PI / 2;
     this.cannonBarrel.rotation = barrelRotation;
     this.cannonBarrelShadow.rotation = barrelRotation;
