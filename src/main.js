@@ -39,6 +39,9 @@ const SOUND_ASSETS = {
 const EDITOR_SHAPES = ['circle', 'spiral', 'bezier', 'wave', 'grid'];
 const EDITOR_PARTS = ['mixed', 'pegs', 'bricks', 'rails', 'bumpers'];
 const EDITOR_TYPES = ['auto', 'orange', 'blue', 'green', 'purple'];
+const EDITOR_MODES = ['procedural', 'manual'];
+const EDITOR_MANUAL_TOOLS = ['peg', 'brick', 'rail', 'bumper', 'erase'];
+const EDITOR_GRID = 32;
 
 const COLORS = {
   panel: 0x141b2a,
@@ -77,6 +80,9 @@ function loadEditorState() {
     turns: 3,
     spread: 1,
     balls: 10,
+    mode: 'procedural',
+    manualTool: 'peg',
+    manualObjects: [],
   };
   try {
     return { ...fallback, ...JSON.parse(localStorage.getItem(EDITOR_SAVE_KEY) || '{}') };
@@ -97,6 +103,9 @@ function clampEditorState(state) {
     turns: Phaser.Math.Clamp(Math.round(state.turns), 1, 8),
     spread: Phaser.Math.Clamp(Number(state.spread), 0.55, 1.45),
     balls: Phaser.Math.Clamp(Math.round(state.balls), 5, 18),
+    mode: EDITOR_MODES.includes(state.mode) ? state.mode : 'procedural',
+    manualTool: EDITOR_MANUAL_TOOLS.includes(state.manualTool) ? state.manualTool : 'peg',
+    manualObjects: Array.isArray(state.manualObjects) ? state.manualObjects.slice(0, 240) : [],
   };
 }
 
@@ -360,6 +369,8 @@ class PegFanScene extends Phaser.Scene {
     this.rewardOverlay = null;
     this.adOverlay = null;
     this.trajectory = null;
+    this.manualDragStart = null;
+    this.manualDragLine = null;
   }
 
   addBackground(title = 'PEG FAN') {
@@ -554,13 +565,15 @@ class PegFanScene extends Phaser.Scene {
     this.addBackground('STAGE EDITOR');
     this.button(756, 72, 190, 52, '戻る', () => this.showMenu(), { size: 21 });
 
-    this.add.text(54, 118, 'PROCEDURAL LAYOUT BUILDER', {
+    this.add.text(54, 118, this.editorState.mode === 'manual' ? 'MANUAL LAYOUT BUILDER' : 'PROCEDURAL LAYOUT BUILDER', {
       fontFamily: 'Verdana',
       fontSize: 22,
       color: '#93c5fd',
       fontStyle: '700',
     });
-    this.add.text(54, 154, '円 / らせん / ベジェ / 波 / グリッドで自動配置。パーツ種別を変えて即プレイテストできます。', {
+    this.add.text(54, 154, this.editorState.mode === 'manual'
+      ? 'グリッドに沿ってクリック配置。ドラッグすると、ブロックやレールを綺麗な線状に並べられます。'
+      : '円 / らせん / ベジェ / 波 / グリッドで自動配置。パーツ種別を変えて即プレイテストできます。', {
       fontFamily: 'Meiryo, Verdana',
       fontSize: 18,
       color: COLORS.muted,
@@ -584,27 +597,28 @@ class PegFanScene extends Phaser.Scene {
     };
 
     this.add.rectangle(450, 1035, 812, 232, 0x101827, 0.94).setStrokeStyle(2, 0x334155);
-    this.add.text(72, 936, `SHAPE  ${state.shape.toUpperCase()}`, { fontFamily: 'Verdana', fontSize: 20, fontStyle: '700', color: COLORS.text });
-    this.add.text(302, 936, `PART  ${state.part.toUpperCase()}`, { fontFamily: 'Verdana', fontSize: 20, fontStyle: '700', color: COLORS.text });
+    this.add.text(72, 936, state.mode === 'manual' ? `MODE  ${state.mode.toUpperCase()}` : `SHAPE  ${state.shape.toUpperCase()}`, { fontFamily: 'Verdana', fontSize: 20, fontStyle: '700', color: COLORS.text });
+    this.add.text(302, 936, state.mode === 'manual' ? `TOOL  ${state.manualTool.toUpperCase()}` : `PART  ${state.part.toUpperCase()}`, { fontFamily: 'Verdana', fontSize: 20, fontStyle: '700', color: COLORS.text });
     this.add.text(512, 936, `TYPE  ${state.type.toUpperCase()}`, { fontFamily: 'Verdana', fontSize: 20, fontStyle: '700', color: COLORS.text });
 
-    this.button(112, 988, 110, 46, 'SHAPE', () => cycle('shape', EDITOR_SHAPES), { size: 17, fill: 0x1f3a5f });
-    this.button(246, 988, 110, 46, 'PART', () => cycle('part', EDITOR_PARTS), { size: 17, fill: 0x1f3a5f });
-    this.button(380, 988, 110, 46, 'TYPE', () => cycle('type', EDITOR_TYPES), { size: 17, fill: 0x1f3a5f });
-    this.button(514, 988, 110, 46, 'RANDOM', () => this.randomizeEditor(), { size: 16, fill: 0x3f2f56, stroke: 0xc084fc });
+    this.button(88, 988, 86, 46, 'MODE', () => cycle('mode', EDITOR_MODES), { size: 15, fill: state.mode === 'manual' ? 0x6b4b18 : 0x1f3a5f, stroke: state.mode === 'manual' ? COLORS.gold : 0x45526a });
+    this.button(190, 988, 86, 46, state.mode === 'manual' ? 'TOOL' : 'SHAPE', () => cycle(state.mode === 'manual' ? 'manualTool' : 'shape', state.mode === 'manual' ? EDITOR_MANUAL_TOOLS : EDITOR_SHAPES), { size: 15, fill: 0x1f3a5f });
+    this.button(292, 988, 86, 46, 'PART', () => cycle('part', EDITOR_PARTS), { size: 15, fill: 0x1f3a5f, disabled: state.mode === 'manual' });
+    this.button(394, 988, 86, 46, 'TYPE', () => cycle('type', EDITOR_TYPES), { size: 15, fill: 0x1f3a5f });
+    this.button(508, 988, 118, 46, state.mode === 'manual' ? 'CLEAR' : 'RANDOM', () => (state.mode === 'manual' ? this.clearManualEditor() : this.randomizeEditor()), { size: 15, fill: 0x3f2f56, stroke: 0xc084fc });
     this.button(686, 988, 200, 46, 'TEST PLAY', () => this.startEditorTest(), { size: 18, fill: 0x2c6f84, stroke: 0x5eead4 });
 
-    this.add.text(78, 1050, `COUNT ${state.count}`, { fontFamily: 'Verdana', fontSize: 18, color: COLORS.text });
-    this.add.text(258, 1050, `RADIUS ${state.radius}`, { fontFamily: 'Verdana', fontSize: 18, color: COLORS.text });
-    this.add.text(458, 1050, `TURNS ${state.turns}`, { fontFamily: 'Verdana', fontSize: 18, color: COLORS.text });
+    this.add.text(78, 1050, state.mode === 'manual' ? `MODE ${state.mode.toUpperCase()}` : `COUNT ${state.count}`, { fontFamily: 'Verdana', fontSize: 18, color: COLORS.text });
+    this.add.text(258, 1050, state.mode === 'manual' ? `TOOL ${state.manualTool.toUpperCase()}` : `RADIUS ${state.radius}`, { fontFamily: 'Verdana', fontSize: 18, color: COLORS.text });
+    this.add.text(458, 1050, state.mode === 'manual' ? `GRID ${EDITOR_GRID}` : `TURNS ${state.turns}`, { fontFamily: 'Verdana', fontSize: 18, color: COLORS.text });
     this.add.text(638, 1050, `BALLS ${state.balls}`, { fontFamily: 'Verdana', fontSize: 18, color: COLORS.text });
 
-    this.button(95, 1102, 62, 42, '-8', () => adjust('count', -8), { size: 16 });
-    this.button(170, 1102, 62, 42, '+8', () => adjust('count', 8), { size: 16 });
-    this.button(278, 1102, 62, 42, '-20', () => adjust('radius', -20), { size: 16 });
-    this.button(354, 1102, 62, 42, '+20', () => adjust('radius', 20), { size: 16 });
-    this.button(476, 1102, 62, 42, '-1', () => adjust('turns', -1), { size: 16 });
-    this.button(552, 1102, 62, 42, '+1', () => adjust('turns', 1), { size: 16 });
+    this.button(95, 1102, 62, 42, state.mode === 'manual' ? 'UNDO' : '-8', () => (state.mode === 'manual' ? this.undoManualObject() : adjust('count', -8)), { size: 15 });
+    this.button(170, 1102, 62, 42, state.mode === 'manual' ? 'ORNG' : '+8', () => (state.mode === 'manual' ? this.setManualType('orange') : adjust('count', 8)), { size: 15 });
+    this.button(278, 1102, 62, 42, state.mode === 'manual' ? 'BLUE' : '-20', () => (state.mode === 'manual' ? this.setManualType('blue') : adjust('radius', -20)), { size: 15 });
+    this.button(354, 1102, 62, 42, state.mode === 'manual' ? 'GREEN' : '+20', () => (state.mode === 'manual' ? this.setManualType('green') : adjust('radius', 20)), { size: 13 });
+    this.button(476, 1102, 62, 42, state.mode === 'manual' ? 'BRICK' : '-1', () => (state.mode === 'manual' ? this.setManualTool('brick') : adjust('turns', -1)), { size: 13 });
+    this.button(552, 1102, 62, 42, state.mode === 'manual' ? 'RAIL' : '+1', () => (state.mode === 'manual' ? this.setManualTool('rail') : adjust('turns', 1)), { size: 14 });
     this.button(662, 1102, 62, 42, '-1', () => adjust('balls', -1), { size: 16 });
     this.button(738, 1102, 62, 42, '+1', () => adjust('balls', 1), { size: 16 });
 
@@ -659,6 +673,192 @@ class PegFanScene extends Phaser.Scene {
       ease: 'Cubic.easeOut',
       onComplete: () => text.destroy(),
     });
+  }
+
+  setManualType(type) {
+    this.editorState.type = type;
+    saveEditorState(this.editorState);
+    this.showStageEditor();
+  }
+
+  setManualTool(tool) {
+    this.editorState.manualTool = tool;
+    saveEditorState(this.editorState);
+    this.showStageEditor();
+  }
+
+  clearManualEditor() {
+    this.editorState.manualObjects = [];
+    saveEditorState(this.editorState);
+    this.showStageEditor();
+  }
+
+  undoManualObject() {
+    this.editorState.manualObjects = this.editorState.manualObjects.slice(0, -1);
+    saveEditorState(this.editorState);
+    this.showStageEditor();
+  }
+
+  editorBounds() {
+    return { left: 80, right: 820, top: 258, bottom: 892 };
+  }
+
+  snapEditorPoint(pointer) {
+    const bounds = this.editorBounds();
+    const world = this.getPointerWorld(pointer);
+    return {
+      x: Phaser.Math.Clamp(Math.round(world.x / EDITOR_GRID) * EDITOR_GRID, bounds.left, bounds.right),
+      y: Phaser.Math.Clamp(Math.round(world.y / EDITOR_GRID) * EDITOR_GRID, bounds.top, bounds.bottom),
+    };
+  }
+
+  manualType() {
+    return this.editorState.type === 'auto' ? 'blue' : this.editorState.type;
+  }
+
+  addManualObject(object) {
+    const next = [...this.editorState.manualObjects, object].slice(-240);
+    this.editorState.manualObjects = next;
+    saveEditorState(this.editorState);
+  }
+
+  createManualSingle(point) {
+    const tool = this.editorState.manualTool;
+    const type = this.manualType();
+    if (tool === 'peg') this.addManualObject({ kind: 'peg', x: point.x, y: point.y, type });
+    if (tool === 'brick') this.addManualObject({ kind: 'brick', x: point.x, y: point.y, w: 88, h: 18, angle: 0, type });
+    if (tool === 'rail') this.addManualObject({ kind: 'rail', x: point.x, y: point.y, w: 128, h: 13, angle: 0 });
+    if (tool === 'bumper') this.addManualObject({ kind: 'bumper', x: point.x, y: point.y, r: 28 });
+  }
+
+  createManualLine(start, end) {
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const distance = Math.hypot(dx, dy);
+    if (distance < EDITOR_GRID * 0.75) {
+      this.createManualSingle(start);
+      return;
+    }
+    const tool = this.editorState.manualTool;
+    const type = this.manualType();
+    const angle = Math.atan2(dy, dx);
+    const spacing = tool === 'peg' ? 38 : tool === 'bumper' ? 58 : tool === 'rail' ? 96 : 74;
+    const count = Phaser.Math.Clamp(Math.floor(distance / spacing) + 1, 2, 48);
+    const objects = [];
+    for (let i = 0; i < count; i += 1) {
+      const t = count === 1 ? 0 : i / (count - 1);
+      const x = Math.round((start.x + dx * t) / EDITOR_GRID) * EDITOR_GRID;
+      const y = Math.round((start.y + dy * t) / EDITOR_GRID) * EDITOR_GRID;
+      if (tool === 'peg') objects.push({ kind: 'peg', x, y, type });
+      if (tool === 'brick') objects.push({ kind: 'brick', x, y, w: 82, h: 18, angle, type });
+      if (tool === 'rail') objects.push({ kind: 'rail', x, y, w: 120, h: 13, angle });
+      if (tool === 'bumper') objects.push({ kind: 'bumper', x, y, r: 28 });
+    }
+    this.editorState.manualObjects = [...this.editorState.manualObjects, ...objects].slice(-240);
+    saveEditorState(this.editorState);
+  }
+
+  eraseManualNear(point, radius = 38) {
+    this.editorState.manualObjects = this.editorState.manualObjects.filter((object) => Math.hypot(object.x - point.x, object.y - point.y) > radius);
+    saveEditorState(this.editorState);
+  }
+
+  eraseManualLine(start, end) {
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const distance = Math.hypot(dx, dy);
+    const steps = Math.max(2, Math.ceil(distance / EDITOR_GRID));
+    for (let i = 0; i <= steps; i += 1) {
+      const t = i / steps;
+      this.eraseManualNear({ x: start.x + dx * t, y: start.y + dy * t }, 34);
+    }
+  }
+
+  handleManualPointerDown(pointer) {
+    if (this.editorState.mode !== 'manual') return;
+    this.manualDragStart = this.snapEditorPoint(pointer);
+    this.manualDragLine?.destroy();
+    this.manualDragLine = this.add.line(0, 0, this.manualDragStart.x, this.manualDragStart.y, this.manualDragStart.x, this.manualDragStart.y, COLORS.gold, 0.8)
+      .setOrigin(0)
+      .setLineWidth(4)
+      .setDepth(8);
+  }
+
+  handleManualPointerMove(pointer) {
+    if (!this.manualDragStart || this.editorState.mode !== 'manual') return;
+    const point = this.snapEditorPoint(pointer);
+    this.manualDragLine?.setTo(this.manualDragStart.x, this.manualDragStart.y, point.x, point.y);
+  }
+
+  handleManualPointerUp(pointer) {
+    if (!this.manualDragStart || this.editorState.mode !== 'manual') return;
+    const start = this.manualDragStart;
+    const end = this.snapEditorPoint(pointer);
+    this.manualDragStart = null;
+    this.manualDragLine?.destroy();
+    this.manualDragLine = null;
+    if (this.editorState.manualTool === 'erase') {
+      this.eraseManualLine(start, end);
+    } else {
+      this.createManualLine(start, end);
+    }
+    this.showStageEditor();
+  }
+
+  renderManualGrid() {
+    const bounds = this.editorBounds();
+    const grid = this.add.graphics().setDepth(2);
+    grid.lineStyle(1, 0x334155, 0.32);
+    for (let x = bounds.left; x <= bounds.right; x += EDITOR_GRID) grid.lineBetween(x, bounds.top, x, bounds.bottom);
+    for (let y = bounds.top; y <= bounds.bottom; y += EDITOR_GRID) grid.lineBetween(bounds.left, y, bounds.right, y);
+    grid.lineStyle(2, COLORS.gold, 0.32);
+    grid.strokeRect(bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top);
+    const zone = this.add.zone(
+      (bounds.left + bounds.right) / 2,
+      (bounds.top + bounds.bottom) / 2,
+      bounds.right - bounds.left,
+      bounds.bottom - bounds.top,
+    ).setInteractive({ useHandCursor: true }).setDepth(6);
+    zone.on('pointerdown', (pointer, localX, localY, event) => {
+      event?.stopPropagation();
+      this.handleManualPointerDown(pointer);
+    });
+    zone.on('pointermove', (pointer) => this.handleManualPointerMove(pointer));
+    zone.on('pointerup', (pointer, localX, localY, event) => {
+      event?.stopPropagation();
+      this.handleManualPointerUp(pointer);
+    });
+  }
+
+  buildManualLevel() {
+    const pegs = [];
+    const bricks = [];
+    const rails = [];
+    const bumpers = [];
+    this.editorState.manualObjects.forEach((object) => {
+      if (object.kind === 'peg') pegs.push({ x: object.x, y: object.y, type: object.type ?? 'blue' });
+      if (object.kind === 'brick') bricks.push({ x: object.x, y: object.y, w: object.w ?? 88, h: object.h ?? 18, angle: object.angle ?? 0, type: object.type ?? 'blue' });
+      if (object.kind === 'rail') rails.push({ x: object.x, y: object.y, w: object.w ?? 128, h: object.h ?? 13, angle: object.angle ?? 0 });
+      if (object.kind === 'bumper') bumpers.push({ x: object.x, y: object.y, r: object.r ?? 28 });
+    });
+    if (!pegs.some((peg) => peg.type === 'orange') && !bricks.some((brick) => brick.type === 'orange')) {
+      if (pegs.length) pegs[0].type = 'orange';
+      else if (bricks.length) bricks[0].type = 'orange';
+    }
+    return {
+      level: 1,
+      editorTest: true,
+      balls: this.editorState.balls,
+      targetCount: pegs.filter((peg) => peg.type === 'orange').length + bricks.filter((brick) => brick.type === 'orange').length,
+      pegs,
+      bricks,
+      rails,
+      timedBlocks: [],
+      spinners: [],
+      bumpers,
+      bucketSpeed: 150,
+      rewardIndex: 0,
+    };
   }
 
   getEditorPoints() {
@@ -721,6 +921,7 @@ class PegFanScene extends Phaser.Scene {
 
   buildEditorLevel() {
     const s = this.editorState;
+    if (s.mode === 'manual') return this.buildManualLevel();
     const points = this.getEditorPoints();
     const pegs = [];
     const bricks = [];
@@ -780,6 +981,7 @@ class PegFanScene extends Phaser.Scene {
     const level = this.buildEditorLevel();
     const panel = this.add.rectangle(WIDTH / 2, 548, 812, 690, 0x0b111b, 0.78).setStrokeStyle(2, 0x243044);
     panel.setDepth(1);
+    if (this.editorState.mode === 'manual') this.renderManualGrid();
     this.add.rectangle(WIDTH / 2, 238, 42, 42, 0x1f2a3c, 1).setStrokeStyle(3, COLORS.gold).setDepth(2);
     this.add.line(0, 0, 80, 258, 820, 258, 0x334155, 0.75).setOrigin(0).setDepth(2);
     this.add.line(0, 0, 80, 1068, 820, 1068, 0x334155, 0.75).setOrigin(0).setDepth(2);
@@ -814,10 +1016,23 @@ class PegFanScene extends Phaser.Scene {
       fontStyle: '700',
       color: COLORS.text,
     }).setDepth(4);
+    if (this.editorState.mode === 'manual') {
+      this.add.text(78, 882, 'CLICK: PLACE   DRAG: LINE   TOOL=ERASE: DELETE', {
+        fontFamily: 'Verdana',
+        fontSize: 15,
+        fontStyle: '700',
+        color: '#93c5fd',
+      }).setDepth(4);
+    }
   }
 
   startEditorTest() {
-    this.startLevel(1, this.buildEditorLevel());
+    const level = this.buildEditorLevel();
+    if (level.targetCount < 1) {
+      this.editorToast('ADD ORANGE TARGET');
+      return;
+    }
+    this.startLevel(1, level);
   }
 
   startLevel(levelNumber, levelOverride = null) {
