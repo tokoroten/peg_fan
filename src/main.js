@@ -459,19 +459,19 @@ class PegFanScene extends Phaser.Scene {
   }
 
   addProgressPanel() {
-    this.add.rectangle(450, 715, 792, 430, 0x111827, 0.9).setStrokeStyle(2, 0x2f3a4d);
-    this.add.text(86, 534, 'PROGRESS', { fontFamily: 'Verdana', fontSize: 28, fontStyle: '700', color: COLORS.text });
-    this.add.text(86, 590, `解放ステージ: ${this.save.unlockedLevel} / ${TOTAL_LEVELS}`, { fontFamily: 'Meiryo, Verdana', fontSize: 28, color: COLORS.text });
-    this.add.text(86, 638, `閲覧可能イラスト: ${this.save.galleryUnlocked} / ${REWARD_COUNT}`, { fontFamily: 'Meiryo, Verdana', fontSize: 28, color: COLORS.text });
+    this.add.rectangle(450, 805, 792, 490, 0x111827, 0.9).setStrokeStyle(2, 0x2f3a4d);
+    this.add.text(86, 594, 'PROGRESS', { fontFamily: 'Verdana', fontSize: 28, fontStyle: '700', color: COLORS.text });
+    this.add.text(86, 650, `解放ステージ: ${this.save.unlockedLevel} / ${TOTAL_LEVELS}`, { fontFamily: 'Meiryo, Verdana', fontSize: 28, color: COLORS.text });
+    this.add.text(86, 698, `閲覧可能イラスト: ${this.save.galleryUnlocked} / ${REWARD_COUNT}`, { fontFamily: 'Meiryo, Verdana', fontSize: 28, color: COLORS.text });
     const barX = 86;
-    const barY = 710;
+    const barY = 770;
     this.add.rectangle(barX + 335, barY, 670, 28, 0x253044);
     this.add.rectangle(barX, barY, 670 * ((this.save.unlockedLevel - 1) / TOTAL_LEVELS), 28, COLORS.gold).setOrigin(0, 0.5);
     for (let i = 0; i < 5; i += 1) {
       const rewardIndex = Math.min(REWARD_COUNT - 1, Math.max(0, this.save.galleryUnlocked - 5 + i));
       const unlocked = rewardIndex < this.save.galleryUnlocked;
-      this.add.image(162 + i * 145, 875, `reward-${rewardIndex + 1}`).setDisplaySize(104, 150).setAlpha(unlocked ? 1 : 0.25);
-      this.add.text(112 + i * 145, 970, unlocked ? `L${rewardIndex + 1}` : `L${i + 1}`, {
+      this.add.image(162 + i * 145, 935, `reward-${rewardIndex + 1}`).setDisplaySize(104, 150).setAlpha(unlocked ? 1 : 0.25);
+      this.add.text(112 + i * 145, 1030, unlocked ? `L${rewardIndex + 1}` : `L${i + 1}`, {
         fontFamily: 'Verdana',
         fontSize: 18,
         fontStyle: '700',
@@ -516,7 +516,7 @@ class PegFanScene extends Phaser.Scene {
       const col = i % 10;
       const row = Math.floor(i / 10);
       const x = 82 + col * 82;
-      const y = 205 + row * 96;
+      const y = 230 + row * 88;
       const unlocked = i < this.save.galleryUnlocked || this.save.clearedAll;
       const tile = this.add.rectangle(x, y, 68, 86, 0x111827, 0.94).setStrokeStyle(2, unlocked ? COLORS.gold : 0x3b4658);
       this.add.image(x, y - 7, `reward-${i + 1}`).setDisplaySize(54, 78).setAlpha(unlocked ? 1 : 0.14);
@@ -539,6 +539,7 @@ class PegFanScene extends Phaser.Scene {
     this.view = 'reward';
     const overlay = this.add.container(0, 0).setDepth(80);
     this.rewardOverlay = overlay;
+    overlay.add(this.add.rectangle(WIDTH / 2, HEIGHT / 2, WIDTH, HEIGHT, 0x050914, 0.72));
     overlay.add(this.add.rectangle(WIDTH / 2, HEIGHT / 2, 760, 1120, 0x070b12, 0.98).setStrokeStyle(2, COLORS.gold));
     overlay.add(this.add.text(WIDTH / 2, 96, `REWARD ${rewardNumber}`, {
       fontFamily: 'Verdana',
@@ -1017,9 +1018,9 @@ class PegFanScene extends Phaser.Scene {
       color: COLORS.text,
     }).setDepth(4);
     if (this.editorState.mode === 'manual') {
-      this.add.text(78, 882, 'CLICK: PLACE   DRAG: LINE   TOOL=ERASE: DELETE', {
+      this.add.text(78, 876, 'CLICK: PLACE   DRAG: LINE   TOOL=ERASE: DELETE', {
         fontFamily: 'Verdana',
-        fontSize: 15,
+        fontSize: 14,
         fontStyle: '700',
         color: '#93c5fd',
       }).setDepth(4);
@@ -1653,7 +1654,7 @@ class PegFanScene extends Phaser.Scene {
     const level = this.level.level;
     const isEditorTest = Boolean(this.level.editorTest);
     const canContinue = !success && this.rewardedContinuesUsed < 1 && !isEditorTest;
-    const panelHeight = isEditorTest ? 460 : success ? 1060 : canContinue ? 520 : 430;
+    const panelHeight = isEditorTest ? 460 : success ? 1060 : canContinue ? 600 : 430;
     const titleY = success ? 176 : HEIGHT / 2 - 180;
     const scoreY = success ? 238 : HEIGHT / 2 - 106;
     this.resultOverlay = this.add.container(0, 0).setDepth(50);
