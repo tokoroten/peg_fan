@@ -30,6 +30,7 @@ const SOUND_ASSETS = {
   green: 'assets/audio/green.wav',
   bumper: 'assets/audio/bumper.wav',
   catch: 'assets/audio/catch.wav',
+  combo: 'assets/audio/combo.wav',
   clear: 'assets/audio/clear.wav',
   fail: 'assets/audio/fail.wav',
   reward: 'assets/audio/reward.wav',
@@ -111,127 +112,171 @@ function seededRandom(seed) {
 
 function generateLevel(level) {
   const rand = seededRandom(level * 9749);
-  const pattern = level % 5;
-  const rows = 6 + Math.min(8, Math.floor(level / 11));
-  const cols = 7 + Math.min(5, Math.floor(level / 18));
   const pegs = [];
-  const top = 295;
-  const left = 105;
-  const cellW = (WIDTH - left * 2) / (cols - 1);
-  const cellH = 57 + Math.min(11, level / 12);
+  const bricks = [];
+  const rails = [];
+  const timedBlocks = [];
+  const spinners = [];
+  const bumpers = [];
+  const archetype = (level - 1) % 8;
+  const difficulty = Phaser.Math.Clamp(level / TOTAL_LEVELS, 0, 1);
+  const density = 42 + Math.floor(difficulty * 42);
+  const addPeg = (x, y, type = 'blue', motion = null) => {
+    if (x > 72 && x < WIDTH - 72 && y > 270 && y < 1048) pegs.push({ x, y, type, motion });
+  };
+  const addRing = (cx, cy, rx, ry, count, offset = 0) => {
+    for (let i = 0; i < count; i += 1) {
+      const angle = offset + (i / count) * Math.PI * 2;
+      addPeg(cx + Math.cos(angle) * rx, cy + Math.sin(angle) * ry);
+    }
+  };
+  const addSpiral = (cx, top, count, turns, maxRadius) => {
+    for (let i = 0; i < count; i += 1) {
+      const t = i / Math.max(1, count - 1);
+      const angle = -Math.PI / 2 + t * turns * Math.PI * 2;
+      const radius = 26 + maxRadius * t;
+      addPeg(cx + Math.cos(angle) * radius, top + t * 610 + Math.sin(angle) * radius * 0.24);
+    }
+  };
+  const addBezier = (p0, p1, p2, p3, count, phase = 0) => {
+    for (let i = 0; i < count; i += 1) {
+      const t = i / Math.max(1, count - 1);
+      const u = 1 - t;
+      const x = u ** 3 * p0.x + 3 * u ** 2 * t * p1.x + 3 * u * t ** 2 * p2.x + t ** 3 * p3.x;
+      const y = u ** 3 * p0.y + 3 * u ** 2 * t * p1.y + 3 * u * t ** 2 * p2.y + t ** 3 * p3.y;
+      addPeg(x + Math.sin(t * Math.PI * 8 + phase) * 20, y);
+    }
+  };
+  const addWave = (y, count, amplitude, waves, phase = 0) => {
+    for (let i = 0; i < count; i += 1) {
+      const t = i / Math.max(1, count - 1);
+      addPeg(92 + t * 716, y + Math.sin(t * Math.PI * 2 * waves + phase) * amplitude);
+    }
+  };
 
-  for (let y = 0; y < rows; y += 1) {
-    for (let x = 0; x < cols; x += 1) {
-      if (rand() < 0.08 + Math.min(0.11, level / 850)) continue;
-      let px = left + x * cellW;
-      let py = top + y * cellH;
-      if (pattern === 1) px += Math.sin((y + level) * 0.82) * 43;
-      if (pattern === 2) py += Math.cos((x + level) * 0.75) * 34;
-      if (pattern === 3) px += (y % 2 ? 0.46 : -0.46) * cellW;
-      if (pattern === 4) {
-        const cx = WIDTH / 2;
-        const angle = (x / Math.max(1, cols - 1)) * Math.PI * 2 + y * 0.42;
-        const radius = 86 + y * 42;
-        px = cx + Math.cos(angle) * radius;
-        py = 360 + Math.sin(angle) * radius * 0.34 + y * 38;
+  if (archetype === 0) {
+    addRing(450, 612, 248, 170, density, rand() * Math.PI);
+    addRing(450, 612, 132, 92, Math.floor(density * 0.58), rand() * Math.PI);
+    rails.push({ x: 450, y: 820, w: 250, h: 13, angle: 0 });
+  } else if (archetype === 1) {
+    addSpiral(450, 318, density + 10, 2.7 + difficulty * 2.5, 255);
+    bricks.push({ x: 312, y: 760, w: 130, h: 18, angle: -0.58, type: 'blue' });
+    bricks.push({ x: 588, y: 760, w: 130, h: 18, angle: 0.58, type: 'blue' });
+  } else if (archetype === 2) {
+    addBezier({ x: 98, y: 890 }, { x: 220, y: 310 }, { x: 685, y: 990 }, { x: 810, y: 365 }, density, level);
+    addBezier({ x: 112, y: 370 }, { x: 280, y: 1010 }, { x: 626, y: 290 }, { x: 800, y: 890 }, Math.floor(density * 0.62), level * 0.7);
+    spinners.push({ x: 450, y: 630, radius: 54, speed: 0.85 + difficulty * 0.7, phase: rand() * Math.PI * 2 });
+  } else if (archetype === 3) {
+    addWave(430, Math.floor(density * 0.5), 58, 2.5, rand() * Math.PI);
+    addWave(620, Math.floor(density * 0.6), 74, 3.5, rand() * Math.PI);
+    addWave(825, Math.floor(density * 0.48), 54, 2, rand() * Math.PI);
+    timedBlocks.push({ x: 450, y: 710, w: 230, h: 22, phase: rand() * Math.PI * 2, period: 2600 });
+  } else if (archetype === 4) {
+    for (let row = 0; row < 9 + Math.floor(difficulty * 4); row += 1) {
+      const cols = row % 2 ? 8 : 9;
+      for (let col = 0; col < cols; col += 1) {
+        if (rand() < 0.09) continue;
+        addPeg(105 + col * 86 + (row % 2 ? 42 : 0), 330 + row * 58 + Math.sin(col + level) * 8);
       }
-      if (px > 76 && px < WIDTH - 76 && py > 270 && py < 1045) {
-        pegs.push({ x: px, y: py, type: 'blue' });
-      }
+    }
+    rails.push({ x: 270, y: 650, w: 190, h: 13, angle: -0.5 });
+    rails.push({ x: 630, y: 650, w: 190, h: 13, angle: 0.5 });
+  } else if (archetype === 5) {
+    addRing(295, 560, 132, 188, Math.floor(density * 0.55), rand() * Math.PI);
+    addRing(606, 650, 148, 210, Math.floor(density * 0.6), rand() * Math.PI);
+    bumpers.push({ x: 450, y: 530, r: 34 }, { x: 450, y: 780, r: 30 });
+    bricks.push({ x: 450, y: 655, w: 190, h: 18, angle: 0.2, type: 'orange' });
+  } else if (archetype === 6) {
+    addSpiral(300, 345, Math.floor(density * 0.68), 2.2 + difficulty * 1.4, 155);
+    addSpiral(600, 345, Math.floor(density * 0.68), -2.2 - difficulty * 1.4, 155);
+    rails.push({ x: 450, y: 875, w: 310, h: 13, angle: 0 });
+    spinners.push({ x: 450, y: 615, radius: 68, speed: -1.1, phase: rand() * Math.PI * 2 });
+  } else {
+    addBezier({ x: 90, y: 340 }, { x: 300, y: 465 }, { x: 240, y: 880 }, { x: 450, y: 1010 }, Math.floor(density * 0.5), 0);
+    addBezier({ x: 810, y: 340 }, { x: 600, y: 465 }, { x: 660, y: 880 }, { x: 450, y: 1010 }, Math.floor(density * 0.5), Math.PI);
+    timedBlocks.push({ x: 450, y: 610, w: 260, h: 22, phase: rand() * Math.PI * 2, period: 2200 });
+    bumpers.push({ x: 450, y: 760, r: 36 });
+  }
+
+  const extraBricks = level > 8 ? Math.min(10, 1 + Math.floor(level / 12)) : 0;
+  for (let i = 0; i < extraBricks; i += 1) {
+    const lane = i / Math.max(1, extraBricks - 1);
+    bricks.push({
+      x: 150 + lane * 600 + Math.sin(level + i) * 26,
+      y: 392 + rand() * 520,
+      w: 78 + rand() * 58,
+      h: 18,
+      angle: (rand() - 0.5) * 1.25,
+      type: rand() < 0.3 ? 'orange' : rand() < 0.12 ? 'green' : 'blue',
+    });
+  }
+
+  if (level > 18) {
+    const railCount = Math.min(6, 1 + Math.floor(level / 18));
+    for (let i = 0; i < railCount; i += 1) {
+      rails.push({
+        x: 170 + rand() * 560,
+        y: 460 + rand() * 450,
+        w: 124 + rand() * 72,
+        h: 13,
+        angle: (rand() - 0.5) * 1.7,
+      });
     }
   }
 
-  const targetCount = Math.min(24, 9 + Math.floor(level / 6));
+  if (level > 24) {
+    const blockCount = Math.min(5, 1 + Math.floor(level / 22));
+    for (let i = 0; i < blockCount; i += 1) {
+      timedBlocks.push({
+        x: 170 + rand() * 560,
+        y: 470 + rand() * 455,
+        w: 92 + rand() * 88,
+        h: 22,
+        phase: rand() * Math.PI * 2,
+        period: 2200 + rand() * 1600,
+      });
+    }
+  }
+
+  if (level > 34) {
+    const spinnerCount = Math.min(4, 1 + Math.floor(level / 26));
+    for (let i = 0; i < spinnerCount; i += 1) {
+      spinners.push({
+        x: 190 + rand() * 520,
+        y: 430 + rand() * 450,
+        radius: 42 + rand() * 34,
+        speed: (rand() < 0.5 ? -1 : 1) * (0.7 + rand() * 0.9),
+        phase: rand() * Math.PI * 2,
+      });
+    }
+  }
+
+  if (level > 12) {
+    const bumperCount = Math.min(5, 1 + Math.floor(level / 22));
+    for (let i = 0; i < bumperCount; i += 1) bumpers.push({ x: 150 + rand() * 600, y: 420 + rand() * 470, r: 24 + rand() * 14 });
+  }
+
+  const targetCount = Math.min(26, 8 + Math.floor(level / 5));
   const shuffled = [...pegs].sort(() => rand() - 0.5);
   shuffled.slice(0, targetCount).forEach((peg) => { peg.type = 'orange'; });
-  shuffled.slice(targetCount, targetCount + 2 + Math.floor(level / 25)).forEach((peg) => { peg.type = 'green'; });
-  shuffled.slice(targetCount + 4, targetCount + 6).forEach((peg) => { peg.type = 'purple'; });
+  shuffled.slice(targetCount, targetCount + 2 + Math.floor(level / 24)).forEach((peg) => { peg.type = 'green'; });
+  shuffled.slice(targetCount + 4, targetCount + 7).forEach((peg) => { peg.type = 'purple'; });
   if (level > 14) {
-    shuffled.slice(targetCount + 7, targetCount + 10 + Math.floor(level / 24)).forEach((peg, index) => {
+    shuffled.slice(targetCount + 7, targetCount + 11 + Math.floor(level / 22)).forEach((peg, index) => {
       peg.motion = {
         axis: index % 2 ? 'y' : 'x',
-        amplitude: 24 + rand() * 28,
-        speed: 0.7 + rand() * 0.55,
+        amplitude: 18 + rand() * 34,
+        speed: 0.55 + rand() * 0.75,
         phase: rand() * Math.PI * 2,
       };
     });
   }
-
-  const bricks = [];
-  if (level > 5) {
-    const brickCount = Math.min(12, 2 + Math.floor(level / 9));
-    for (let i = 0; i < brickCount; i += 1) {
-      const type = i < Math.floor(brickCount * 0.34) ? 'orange' : rand() < 0.16 ? 'green' : 'blue';
-      bricks.push({
-        x: 145 + rand() * 610,
-        y: 375 + rand() * 485,
-        w: 72 + rand() * 48,
-        h: 18,
-        angle: (rand() - 0.5) * 0.9,
-        type,
-      });
-    }
-  }
-
-  const rails = [];
-  if (level > 11) {
-    const railCount = Math.min(7, 1 + Math.floor(level / 14));
-    for (let i = 0; i < railCount; i += 1) {
-      rails.push({
-        x: 165 + rand() * 570,
-        y: 505 + rand() * 395,
-        w: 118 + rand() * 86,
-        h: 14,
-        angle: (rand() - 0.5) * 1.5,
-      });
-    }
-  }
-
-  const timedBlocks = [];
-  if (level > 20) {
-    const blockCount = Math.min(6, 1 + Math.floor(level / 18));
-    for (let i = 0; i < blockCount; i += 1) {
-      timedBlocks.push({
-        x: 165 + rand() * 570,
-        y: 470 + rand() * 460,
-        w: 86 + rand() * 76,
-        h: 22,
-        phase: rand() * Math.PI * 2,
-        period: 2300 + rand() * 1500,
-      });
-    }
-  }
-
-  const spinners = [];
-  if (level > 30) {
-    const spinnerCount = Math.min(4, 1 + Math.floor(level / 24));
-    for (let i = 0; i < spinnerCount; i += 1) {
-      spinners.push({
-        x: 185 + rand() * 530,
-        y: 430 + rand() * 430,
-        radius: 42 + rand() * 28,
-        speed: (rand() < 0.5 ? -1 : 1) * (0.75 + rand() * 0.75),
-        phase: rand() * Math.PI * 2,
-      });
-    }
-  }
-
-  const bumpers = [];
-  if (level > 9) {
-    const bumperCount = Math.min(5, 1 + Math.floor(level / 19));
-    for (let i = 0; i < bumperCount; i += 1) {
-      bumpers.push({
-        x: 150 + rand() * 600,
-        y: 415 + rand() * 430,
-        r: 24 + rand() * 14,
-      });
-    }
-  }
+  const actualTargetCount = pegs.filter((peg) => peg.type === 'orange').length + bricks.filter((brick) => brick.type === 'orange').length;
 
   return {
     level,
     balls: Math.max(7, 11 - Math.floor(level / 20)),
-    targetCount,
+    targetCount: actualTargetCount,
     pegs,
     bricks,
     rails,
@@ -765,6 +810,7 @@ class PegFanScene extends Phaser.Scene {
     this.levelCleared = false;
     this.orangeClearPending = false;
     this.orangeClearAnnounced = false;
+    this.shotCombo = 0;
     this.currentAim = { x: 0, y: 1 };
 
     this.addBackground(this.level.editorTest ? 'EDITOR TEST' : `LEVEL ${levelNumber}`);
@@ -1141,6 +1187,7 @@ class PegFanScene extends Phaser.Scene {
     this.flashLaunch();
     this.playSfx('launch', { volume: 0.55 });
     this.shotsLeft -= 1;
+    this.shotCombo = 0;
     this.refreshHud();
   }
 
@@ -1218,13 +1265,20 @@ class PegFanScene extends Phaser.Scene {
   hitPeg(ball, peg) {
     if (peg.hit) return;
     peg.hit = true;
+    this.shotCombo = (this.shotCombo ?? 0) + 1;
     if (ball.body) this.setBodyVelocity(ball, ball.body.velocity.x * 1.03, ball.body.velocity.y * 1.03);
-    this.score += peg.value;
+    const comboBonus = this.shotCombo > 2 ? Math.min(450, (this.shotCombo - 2) * 35) : 0;
+    const gained = peg.value + comboBonus;
+    this.score += gained;
     if (peg.pegType === 'orange') this.targetsLeft -= 1;
     if (peg.pegType === 'green' && !this.orangeClearPending) this.multiballQueued = true;
-    this.playSfx(peg.pegType === 'orange' ? 'orange' : peg.pegType === 'green' ? 'green' : 'peg', { volume: peg.pegType === 'orange' ? 0.72 : 0.58 });
+    const hitSound = this.shotCombo >= 6 ? 'combo' : peg.pegType === 'orange' ? 'orange' : peg.pegType === 'green' ? 'green' : 'peg';
+    this.playSfx(hitSound, {
+      volume: peg.pegType === 'orange' ? 0.74 : 0.58,
+      rate: Phaser.Math.Clamp(0.92 + this.shotCombo * 0.045, 0.92, 1.45),
+    });
     this.burst(peg.x, peg.y, peg.fillColor ?? COLORS.gold);
-    this.popText(peg.x, peg.y - 20, `+${peg.value}`, peg.pegType === 'orange' ? '#ffb088' : '#dbeafe');
+    this.popText(peg.x, peg.y - 20, this.shotCombo > 2 ? `+${gained} x${this.shotCombo}` : `+${gained}`, peg.pegType === 'orange' ? '#ffb088' : '#dbeafe');
     this.tweens.add({
       targets: peg,
       scale: 1.85,
@@ -1283,9 +1337,11 @@ class PegFanScene extends Phaser.Scene {
     }
     ball.destroy();
     if (this.orangeClearPending && this.inFlight === 0) {
+      this.shotCombo = 0;
       this.finishPendingClear();
       return;
     }
+    if (this.inFlight === 0) this.shotCombo = 0;
     if (this.inFlight === 0 && this.shotsLeft <= 0 && this.targetsLeft > 0) this.failLevel();
   }
 

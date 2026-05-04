@@ -84,6 +84,11 @@ writeWav('orange.wav', 0.22, (t, p) => (tone(520 + p * 680, t) + tone(1040 + p *
 writeWav('green.wav', 0.28, (t, p) => (tone(392, t) + tone(784 + p * 320, t) + tone(1176, t) * 0.25) * env(p, 16) * 0.45);
 writeWav('bumper.wav', 0.18, (t, p) => (tone(260 + p * 1200, t) + tone(1560, t) * 0.28) * env(p, 10) * 0.5);
 writeWav('catch.wav', 0.36, (t, p) => (tone(440, t) + tone(660, t) + tone(990, t)) * env(p, 22) * 0.35);
+writeWav('combo.wav', 0.32, (t, p) => {
+  const sweep = 720 + p * 1600;
+  const bell = 1046.5 + Math.sin(p * Math.PI) * 880;
+  return (tone(sweep, t) * 0.58 + tone(bell, t) * 0.34 + tone(2093, t) * 0.16) * env(p, 24) * 0.46;
+});
 writeWav('clear.wav', 0.9, (t, p) => {
   const notes = [523.25, 659.25, 783.99, 1046.5];
   const n = notes[Math.min(3, Math.floor(p * 4))];
