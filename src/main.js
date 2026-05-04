@@ -6,6 +6,7 @@ const HEIGHT = 1300;
 const TOTAL_LEVELS = 100;
 const REWARD_COUNT = 100;
 const SAVE_KEY = 'peg-fan-save-v1';
+const EDITOR_SAVE_KEY = 'peg-fan-editor-v1';
 const CANNON_X = WIDTH / 2;
 const CANNON_Y = 168;
 const LAUNCH_SPEED = 660;
@@ -34,6 +35,10 @@ const SOUND_ASSETS = {
   reward: 'assets/audio/reward.wav',
 };
 
+const EDITOR_SHAPES = ['circle', 'spiral', 'bezier', 'wave', 'grid'];
+const EDITOR_PARTS = ['mixed', 'pegs', 'bricks', 'rails', 'bumpers'];
+const EDITOR_TYPES = ['auto', 'orange', 'blue', 'green', 'purple'];
+
 const COLORS = {
   panel: 0x141b2a,
   panel2: 0x202a3d,
@@ -59,6 +64,39 @@ function loadSave() {
 
 function saveProgress(save) {
   localStorage.setItem(SAVE_KEY, JSON.stringify(save));
+}
+
+function loadEditorState() {
+  const fallback = {
+    shape: 'circle',
+    part: 'mixed',
+    type: 'auto',
+    count: 56,
+    radius: 260,
+    turns: 3,
+    spread: 1,
+    balls: 10,
+  };
+  try {
+    return { ...fallback, ...JSON.parse(localStorage.getItem(EDITOR_SAVE_KEY) || '{}') };
+  } catch {
+    return fallback;
+  }
+}
+
+function saveEditorState(state) {
+  localStorage.setItem(EDITOR_SAVE_KEY, JSON.stringify(state));
+}
+
+function clampEditorState(state) {
+  return {
+    ...state,
+    count: Phaser.Math.Clamp(Math.round(state.count), 12, 140),
+    radius: Phaser.Math.Clamp(Math.round(state.radius), 80, 380),
+    turns: Phaser.Math.Clamp(Math.round(state.turns), 1, 8),
+    spread: Phaser.Math.Clamp(Number(state.spread), 0.55, 1.45),
+    balls: Phaser.Math.Clamp(Math.round(state.balls), 5, 18),
+  };
 }
 
 function seededRandom(seed) {
@@ -319,6 +357,7 @@ class PegFanScene extends Phaser.Scene {
     this.button(590, 300, 250, 72, 'ステージ選択', () => this.showLevelSelect());
     this.button(220, 398, 330, 72, 'ギャラリー', () => this.showGallery());
     this.button(590, 398, 250, 72, '最初から', () => this.startLevel(1), { fill: 0x4b3344 });
+    this.button(450, 496, 620, 68, 'STAGE EDITOR', () => this.showStageEditor(), { fill: 0x334155, stroke: 0x93c5fd, size: 24 });
     this.button(450, 1085, 360, 46, 'DEBUG: 全解放', () => this.debugUnlockAll(), { fill: 0x2b3445, stroke: 0x64748b, size: 18 });
 
     this.addProgressPanel();
@@ -438,10 +477,283 @@ class PegFanScene extends Phaser.Scene {
     overlay.add([close.rect, close.text]);
   }
 
-  startLevel(levelNumber) {
+  showStageEditor() {
+    this.view = 'editor';
+    this.clearScene();
+    this.editorState = clampEditorState(this.editorState ?? loadEditorState());
+    this.addBackground('STAGE EDITOR');
+    this.button(756, 72, 190, 52, '戻る', () => this.showMenu(), { size: 21 });
+
+    this.add.text(54, 118, 'PROCEDURAL LAYOUT BUILDER', {
+      fontFamily: 'Verdana',
+      fontSize: 22,
+      color: '#93c5fd',
+      fontStyle: '700',
+    });
+    this.add.text(54, 154, '円 / らせん / ベジェ / 波 / グリッドで自動配置。パーツ種別を変えて即プレイテストできます。', {
+      fontFamily: 'Meiryo, Verdana',
+      fontSize: 18,
+      color: COLORS.muted,
+      wordWrap: { width: 760 },
+    });
+
+    this.addEditorControls();
+    this.renderEditorPreview();
+  }
+
+  addEditorControls() {
+    const state = this.editorState;
+    const cycle = (key, values, dir = 1) => {
+      const index = values.indexOf(state[key]);
+      state[key] = values[(index + dir + values.length) % values.length];
+      this.updateEditorState(state);
+    };
+    const adjust = (key, delta) => {
+      state[key] += delta;
+      this.updateEditorState(state);
+    };
+
+    this.add.rectangle(450, 1035, 812, 232, 0x101827, 0.94).setStrokeStyle(2, 0x334155);
+    this.add.text(72, 936, `SHAPE  ${state.shape.toUpperCase()}`, { fontFamily: 'Verdana', fontSize: 20, fontStyle: '700', color: COLORS.text });
+    this.add.text(302, 936, `PART  ${state.part.toUpperCase()}`, { fontFamily: 'Verdana', fontSize: 20, fontStyle: '700', color: COLORS.text });
+    this.add.text(512, 936, `TYPE  ${state.type.toUpperCase()}`, { fontFamily: 'Verdana', fontSize: 20, fontStyle: '700', color: COLORS.text });
+
+    this.button(112, 988, 110, 46, 'SHAPE', () => cycle('shape', EDITOR_SHAPES), { size: 17, fill: 0x1f3a5f });
+    this.button(246, 988, 110, 46, 'PART', () => cycle('part', EDITOR_PARTS), { size: 17, fill: 0x1f3a5f });
+    this.button(380, 988, 110, 46, 'TYPE', () => cycle('type', EDITOR_TYPES), { size: 17, fill: 0x1f3a5f });
+    this.button(514, 988, 110, 46, 'RANDOM', () => this.randomizeEditor(), { size: 16, fill: 0x3f2f56, stroke: 0xc084fc });
+    this.button(686, 988, 200, 46, 'TEST PLAY', () => this.startEditorTest(), { size: 18, fill: 0x2c6f84, stroke: 0x5eead4 });
+
+    this.add.text(78, 1050, `COUNT ${state.count}`, { fontFamily: 'Verdana', fontSize: 18, color: COLORS.text });
+    this.add.text(258, 1050, `RADIUS ${state.radius}`, { fontFamily: 'Verdana', fontSize: 18, color: COLORS.text });
+    this.add.text(458, 1050, `TURNS ${state.turns}`, { fontFamily: 'Verdana', fontSize: 18, color: COLORS.text });
+    this.add.text(638, 1050, `BALLS ${state.balls}`, { fontFamily: 'Verdana', fontSize: 18, color: COLORS.text });
+
+    this.button(95, 1102, 62, 42, '-8', () => adjust('count', -8), { size: 16 });
+    this.button(170, 1102, 62, 42, '+8', () => adjust('count', 8), { size: 16 });
+    this.button(278, 1102, 62, 42, '-20', () => adjust('radius', -20), { size: 16 });
+    this.button(354, 1102, 62, 42, '+20', () => adjust('radius', 20), { size: 16 });
+    this.button(476, 1102, 62, 42, '-1', () => adjust('turns', -1), { size: 16 });
+    this.button(552, 1102, 62, 42, '+1', () => adjust('turns', 1), { size: 16 });
+    this.button(662, 1102, 62, 42, '-1', () => adjust('balls', -1), { size: 16 });
+    this.button(738, 1102, 62, 42, '+1', () => adjust('balls', 1), { size: 16 });
+
+    this.button(232, 1170, 270, 48, 'SAVE TEMPLATE', () => this.saveEditorTemplate(), { size: 17, fill: 0x4a3d21, stroke: COLORS.gold });
+    this.button(550, 1170, 270, 48, 'LOAD TEMPLATE', () => this.loadEditorTemplate(), { size: 17, fill: 0x334155, stroke: 0x93c5fd });
+  }
+
+  updateEditorState(nextState) {
+    this.editorState = clampEditorState(nextState);
+    saveEditorState(this.editorState);
+    this.showStageEditor();
+  }
+
+  randomizeEditor() {
+    const rand = seededRandom(Date.now() % 1000000);
+    this.editorState = clampEditorState({
+      shape: EDITOR_SHAPES[Math.floor(rand() * EDITOR_SHAPES.length)],
+      part: EDITOR_PARTS[Math.floor(rand() * EDITOR_PARTS.length)],
+      type: EDITOR_TYPES[Math.floor(rand() * EDITOR_TYPES.length)],
+      count: 28 + Math.floor(rand() * 84),
+      radius: 140 + Math.floor(rand() * 210),
+      turns: 2 + Math.floor(rand() * 5),
+      spread: 0.75 + rand() * 0.55,
+      balls: 7 + Math.floor(rand() * 7),
+    });
+    saveEditorState(this.editorState);
+    this.showStageEditor();
+  }
+
+  saveEditorTemplate() {
+    saveEditorState(this.editorState);
+    this.editorToast('TEMPLATE SAVED');
+  }
+
+  loadEditorTemplate() {
+    this.editorState = clampEditorState(loadEditorState());
+    this.showStageEditor();
+  }
+
+  editorToast(label) {
+    const text = this.add.text(WIDTH / 2, 865, label, {
+      fontFamily: 'Verdana',
+      fontSize: 24,
+      fontStyle: '700',
+      color: '#ffd35a',
+    }).setOrigin(0.5).setDepth(40);
+    this.tweens.add({
+      targets: text,
+      y: 828,
+      alpha: 0,
+      duration: 900,
+      ease: 'Cubic.easeOut',
+      onComplete: () => text.destroy(),
+    });
+  }
+
+  getEditorPoints() {
+    const s = this.editorState;
+    const points = [];
+    const count = s.count;
+    const centerX = WIDTH / 2;
+    const centerY = 610;
+    for (let i = 0; i < count; i += 1) {
+      const t = count <= 1 ? 0 : i / (count - 1);
+      let x = centerX;
+      let y = centerY;
+      let angle = 0;
+      if (s.shape === 'circle') {
+        angle = (i / count) * Math.PI * 2;
+        const ring = i % 2 ? 0.72 : 1;
+        x = centerX + Math.cos(angle) * s.radius * ring;
+        y = centerY + Math.sin(angle) * s.radius * 0.72 * ring;
+      } else if (s.shape === 'spiral') {
+        angle = t * s.turns * Math.PI * 2 - Math.PI / 2;
+        const radius = 28 + t * s.radius;
+        x = centerX + Math.cos(angle) * radius;
+        y = 360 + t * 570 + Math.sin(angle) * radius * 0.28;
+      } else if (s.shape === 'bezier') {
+        const p0 = { x: 112, y: 910 };
+        const p1 = { x: 240, y: 280 };
+        const p2 = { x: 670, y: 990 };
+        const p3 = { x: 790, y: 360 };
+        const u = 1 - t;
+        x = u ** 3 * p0.x + 3 * u ** 2 * t * p1.x + 3 * u * t ** 2 * p2.x + t ** 3 * p3.x;
+        y = u ** 3 * p0.y + 3 * u ** 2 * t * p1.y + 3 * u * t ** 2 * p2.y + t ** 3 * p3.y;
+        const tx = 3 * u ** 2 * (p1.x - p0.x) + 6 * u * t * (p2.x - p1.x) + 3 * t ** 2 * (p3.x - p2.x);
+        const ty = 3 * u ** 2 * (p1.y - p0.y) + 6 * u * t * (p2.y - p1.y) + 3 * t ** 2 * (p3.y - p2.y);
+        angle = Math.atan2(ty, tx);
+      } else if (s.shape === 'wave') {
+        x = 95 + t * 710;
+        y = 610 + Math.sin(t * Math.PI * 2 * s.turns) * s.radius * 0.6;
+        angle = Math.atan2(Math.cos(t * Math.PI * 2 * s.turns), 1);
+      } else {
+        const cols = Math.max(5, Math.round(Math.sqrt(count * 1.35)));
+        const row = Math.floor(i / cols);
+        const col = i % cols;
+        x = 130 + col * Math.min(86, (WIDTH - 260) / Math.max(1, cols - 1));
+        y = 330 + row * 58;
+        x += row % 2 ? 30 : 0;
+        angle = (row % 2 ? 0.18 : -0.18);
+      }
+      if (x > 72 && x < WIDTH - 72 && y > 270 && y < 1048) points.push({ x, y, angle, index: i });
+    }
+    return points;
+  }
+
+  editorPegType(index) {
+    if (this.editorState.type !== 'auto') return this.editorState.type;
+    if (index % 7 === 0) return 'orange';
+    if (index % 19 === 0) return 'green';
+    if (index % 13 === 0) return 'purple';
+    return 'blue';
+  }
+
+  buildEditorLevel() {
+    const s = this.editorState;
+    const points = this.getEditorPoints();
+    const pegs = [];
+    const bricks = [];
+    const rails = [];
+    const timedBlocks = [];
+    const bumpers = [];
+    const spinners = [];
+    const usePegs = s.part === 'mixed' || s.part === 'pegs';
+    const useBricks = s.part === 'mixed' || s.part === 'bricks';
+    const useRails = s.part === 'mixed' || s.part === 'rails';
+    const useBumpers = s.part === 'mixed' || s.part === 'bumpers';
+
+    points.forEach((point, index) => {
+      if (usePegs && (s.part !== 'mixed' || index % 3 !== 1)) {
+        pegs.push({ x: point.x, y: point.y, type: this.editorPegType(index) });
+      }
+      if (useBricks && index % (s.part === 'bricks' ? 2 : 9) === 0) {
+        bricks.push({
+          x: point.x,
+          y: point.y,
+          w: 72 + (index % 4) * 16,
+          h: 18,
+          angle: point.angle,
+          type: this.editorPegType(index + 2),
+        });
+      }
+      if (useRails && index % (s.part === 'rails' ? 3 : 13) === 0) {
+        rails.push({ x: point.x, y: point.y, w: 116, h: 13, angle: point.angle + Math.PI / 2 });
+      }
+      if (useBumpers && index % (s.part === 'bumpers' ? 4 : 17) === 0) {
+        bumpers.push({ x: point.x, y: point.y, r: 24 + (index % 3) * 4 });
+      }
+    });
+
+    if (!pegs.some((peg) => peg.type === 'orange') && pegs.length) pegs[0].type = 'orange';
+    if (s.part === 'mixed') {
+      timedBlocks.push({ x: 450, y: 830, w: 210, h: 22, phase: 0, period: 2800 });
+      spinners.push({ x: 450, y: 560, radius: 58, speed: 0.9, phase: 0 });
+    }
+    return {
+      level: 1,
+      editorTest: true,
+      balls: s.balls,
+      targetCount: pegs.filter((peg) => peg.type === 'orange').length + bricks.filter((brick) => brick.type === 'orange').length,
+      pegs,
+      bricks,
+      rails,
+      timedBlocks,
+      spinners,
+      bumpers,
+      bucketSpeed: 150,
+      rewardIndex: 0,
+    };
+  }
+
+  renderEditorPreview() {
+    const level = this.buildEditorLevel();
+    const panel = this.add.rectangle(WIDTH / 2, 548, 812, 690, 0x0b111b, 0.78).setStrokeStyle(2, 0x243044);
+    panel.setDepth(1);
+    this.add.rectangle(WIDTH / 2, 238, 42, 42, 0x1f2a3c, 1).setStrokeStyle(3, COLORS.gold).setDepth(2);
+    this.add.line(0, 0, 80, 258, 820, 258, 0x334155, 0.75).setOrigin(0).setDepth(2);
+    this.add.line(0, 0, 80, 1068, 820, 1068, 0x334155, 0.75).setOrigin(0).setDepth(2);
+
+    level.pegs.forEach((peg) => {
+      const color = peg.type === 'orange' ? COLORS.orange : peg.type === 'green' ? COLORS.green : peg.type === 'purple' ? COLORS.purple : COLORS.blue;
+      this.add.circle(peg.x, peg.y, 11, color, 1).setStrokeStyle(3, 0xffffff, 0.26).setDepth(3);
+    });
+    level.bricks.forEach((brick) => {
+      const color = brick.type === 'orange' ? COLORS.orange : brick.type === 'green' ? COLORS.green : COLORS.blue;
+      const rect = this.add.rectangle(brick.x, brick.y, brick.w, brick.h, color, 0.9).setStrokeStyle(2, 0xffffff, 0.25).setDepth(3);
+      rect.rotation = brick.angle;
+    });
+    level.rails.forEach((rail) => {
+      const rect = this.add.rectangle(rail.x, rail.y, rail.w, rail.h, 0x8ea2c7, 0.36).setStrokeStyle(2, 0xdbeafe, 0.45).setDepth(3);
+      rect.rotation = rail.angle;
+    });
+    level.timedBlocks.forEach((block) => {
+      this.add.rectangle(block.x, block.y, block.w, block.h, 0x38bdf8, 0.5).setStrokeStyle(2, 0xe0f2fe, 0.7).setDepth(3);
+    });
+    level.bumpers.forEach((bumper) => {
+      this.add.circle(bumper.x, bumper.y, bumper.r, 0xe7eef8, 0.16).setStrokeStyle(4, COLORS.cyan, 0.72).setDepth(3);
+    });
+    level.spinners.forEach((spinner) => {
+      const line = this.add.line(0, 0, spinner.x - spinner.radius, spinner.y, spinner.x + spinner.radius, spinner.y, COLORS.gold, 0.58).setOrigin(0).setLineWidth(5).setDepth(3);
+      line.rotation = spinner.phase;
+      this.add.circle(spinner.x, spinner.y, 10, 0xf8fafc, 0.3).setStrokeStyle(3, COLORS.gold).setDepth(4);
+    });
+    this.add.text(78, 852, `OBJECTS ${level.pegs.length + level.bricks.length + level.rails.length + level.bumpers.length + level.timedBlocks.length + level.spinners.length}   ORANGE ${level.targetCount}`, {
+      fontFamily: 'Verdana',
+      fontSize: 20,
+      fontStyle: '700',
+      color: COLORS.text,
+    }).setDepth(4);
+  }
+
+  startEditorTest() {
+    this.startLevel(1, this.buildEditorLevel());
+  }
+
+  startLevel(levelNumber, levelOverride = null) {
     this.view = 'game';
     this.clearScene();
-    this.level = generateLevel(levelNumber);
+    this.level = levelOverride ?? generateLevel(levelNumber);
     this.blockVisuals = [];
     this.shotsLeft = this.level.balls;
     this.score = 0;
@@ -451,9 +763,11 @@ class PegFanScene extends Phaser.Scene {
     this.multiballQueued = false;
     this.rewardedContinuesUsed = 0;
     this.levelCleared = false;
+    this.orangeClearPending = false;
+    this.orangeClearAnnounced = false;
     this.currentAim = { x: 0, y: 1 };
 
-    this.addBackground(`LEVEL ${levelNumber}`);
+    this.addBackground(this.level.editorTest ? 'EDITOR TEST' : `LEVEL ${levelNumber}`);
     this.createAimControls();
     this.createGameUi();
     this.createBucket();
@@ -815,7 +1129,7 @@ class PegFanScene extends Phaser.Scene {
   }
 
   launchBall(pointer = this.input.activePointer) {
-    if (this.view !== 'game' || this.inFlight > 0 || this.shotsLeft <= 0) return;
+    if (this.view !== 'game' || this.inFlight > 0 || this.shotsLeft <= 0 || this.orangeClearPending) return;
     this.currentAim = this.calculateAim(pointer);
     const muzzle = this.getMuzzlePoint(76);
     this.spawnBall(
@@ -907,7 +1221,7 @@ class PegFanScene extends Phaser.Scene {
     if (ball.body) this.setBodyVelocity(ball, ball.body.velocity.x * 1.03, ball.body.velocity.y * 1.03);
     this.score += peg.value;
     if (peg.pegType === 'orange') this.targetsLeft -= 1;
-    if (peg.pegType === 'green') this.multiballQueued = true;
+    if (peg.pegType === 'green' && !this.orangeClearPending) this.multiballQueued = true;
     this.playSfx(peg.pegType === 'orange' ? 'orange' : peg.pegType === 'green' ? 'green' : 'peg', { volume: peg.pegType === 'orange' ? 0.72 : 0.58 });
     this.burst(peg.x, peg.y, peg.fillColor ?? COLORS.gold);
     this.popText(peg.x, peg.y - 20, `+${peg.value}`, peg.pegType === 'orange' ? '#ffb088' : '#dbeafe');
@@ -926,7 +1240,7 @@ class PegFanScene extends Phaser.Scene {
       this.spawnBall(ball.x, ball.y, -ball.body.velocity.x * 0.7, ball.body.velocity.y * 0.8);
     }
     this.refreshHud();
-    if (this.targetsLeft <= 0) this.clearLevel();
+    if (this.targetsLeft <= 0) this.beginOrangeClear();
   }
 
   hitBumper(ball) {
@@ -951,10 +1265,10 @@ class PegFanScene extends Phaser.Scene {
     if (!ball || ball === this.bucket) return;
     if (ball.caught) return;
     ball.caught = true;
-    this.shotsLeft += 1;
+    if (!this.orangeClearPending) this.shotsLeft += 1;
     this.score += 250;
     this.playSfx('catch', { volume: 0.7 });
-    this.popText(this.bucket.x, this.bucket.y - 42, '+1 BALL', '#ffd35a');
+    this.popText(this.bucket.x, this.bucket.y - 42, this.orangeClearPending ? '+250' : '+1 BALL', '#ffd35a');
     this.removeBall(ball);
     this.refreshHud();
   }
@@ -968,22 +1282,67 @@ class PegFanScene extends Phaser.Scene {
       this.matterBodies = this.matterBodies.filter((body) => body !== ball.body);
     }
     ball.destroy();
+    if (this.orangeClearPending && this.inFlight === 0) {
+      this.finishPendingClear();
+      return;
+    }
     if (this.inFlight === 0 && this.shotsLeft <= 0 && this.targetsLeft > 0) this.failLevel();
+  }
+
+  beginOrangeClear() {
+    if (this.orangeClearPending || this.levelCleared) return;
+    this.orangeClearPending = true;
+    this.orangeClearAnnounced = true;
+    this.playSfx('clear', { volume: 0.86 });
+    this.refreshHud();
+    const banner = this.add.container(WIDTH / 2, 238).setDepth(35);
+    banner.add(this.add.rectangle(0, 0, 520, 92, 0x141b2a, 0.88).setStrokeStyle(3, COLORS.gold, 0.95));
+    banner.add(this.add.text(0, -18, 'ORANGE CLEAR', {
+      fontFamily: 'Verdana',
+      fontSize: 36,
+      fontStyle: '700',
+      color: '#ffd35a',
+    }).setOrigin(0.5));
+    banner.add(this.add.text(0, 25, 'LAST BALL SCORING', {
+      fontFamily: 'Verdana',
+      fontSize: 17,
+      fontStyle: '700',
+      color: '#dbeafe',
+    }).setOrigin(0.5));
+    this.tweens.add({
+      targets: banner,
+      y: 196,
+      alpha: 0,
+      duration: 1300,
+      ease: 'Cubic.easeOut',
+      onComplete: () => banner.destroy(true),
+    });
+    for (let i = 0; i < 12; i += 1) {
+      this.time.delayedCall(i * 45, () => this.burst(CANNON_X + Math.cos(i) * 80, CANNON_Y + Math.sin(i) * 48, COLORS.gold));
+    }
+    if (this.inFlight === 0) this.finishPendingClear();
+  }
+
+  finishPendingClear() {
+    if (!this.orangeClearPending || this.levelCleared) return;
+    this.clearLevel();
   }
 
   clearLevel() {
     if (this.levelCleared) return;
     this.levelCleared = true;
     const level = this.level.level;
-    if (!this.save.completedLevels.includes(level)) this.save.completedLevels.push(level);
-    this.save.unlockedLevel = Math.min(TOTAL_LEVELS, Math.max(this.save.unlockedLevel, level + 1));
-    this.save.galleryUnlocked = Math.max(this.save.galleryUnlocked, Math.min(REWARD_COUNT, level));
-    if (level >= TOTAL_LEVELS) {
-      this.save.clearedAll = true;
-      this.save.galleryUnlocked = REWARD_COUNT;
+    if (!this.level.editorTest) {
+      if (!this.save.completedLevels.includes(level)) this.save.completedLevels.push(level);
+      this.save.unlockedLevel = Math.min(TOTAL_LEVELS, Math.max(this.save.unlockedLevel, level + 1));
+      this.save.galleryUnlocked = Math.max(this.save.galleryUnlocked, Math.min(REWARD_COUNT, level));
+      if (level >= TOTAL_LEVELS) {
+        this.save.clearedAll = true;
+        this.save.galleryUnlocked = REWARD_COUNT;
+      }
+      saveProgress(this.save);
     }
-    saveProgress(this.save);
-    this.playSfx('clear', { volume: 0.82 });
+    if (!this.orangeClearAnnounced) this.playSfx('clear', { volume: 0.82 });
     this.time.delayedCall(550, () => this.showResult(true));
   }
 
@@ -996,13 +1355,14 @@ class PegFanScene extends Phaser.Scene {
     this.view = 'result';
     this.resultOverlay?.destroy(true);
     const level = this.level.level;
-    const canContinue = !success && this.rewardedContinuesUsed < 1;
-    const panelHeight = success ? 1060 : canContinue ? 520 : 430;
+    const isEditorTest = Boolean(this.level.editorTest);
+    const canContinue = !success && this.rewardedContinuesUsed < 1 && !isEditorTest;
+    const panelHeight = isEditorTest ? 460 : success ? 1060 : canContinue ? 520 : 430;
     const titleY = success ? 176 : HEIGHT / 2 - 180;
     const scoreY = success ? 238 : HEIGHT / 2 - 106;
     this.resultOverlay = this.add.container(0, 0).setDepth(50);
     this.resultOverlay.add(this.add.rectangle(WIDTH / 2, HEIGHT / 2, 720, panelHeight, 0x0e1420, 0.96).setStrokeStyle(2, success ? COLORS.gold : COLORS.red));
-    this.resultOverlay.add(this.add.text(WIDTH / 2, titleY, success ? 'STAGE CLEAR' : 'OUT OF BALLS', {
+    this.resultOverlay.add(this.add.text(WIDTH / 2, titleY, isEditorTest && success ? 'EDITOR TEST CLEAR' : success ? 'STAGE CLEAR' : 'OUT OF BALLS', {
       fontFamily: 'Verdana',
       fontSize: 48,
       fontStyle: '700',
@@ -1014,7 +1374,7 @@ class PegFanScene extends Phaser.Scene {
       color: COLORS.text,
     }).setOrigin(0.5));
 
-    if (success) {
+    if (success && !isEditorTest) {
       const rewardNumber = Phaser.Math.Clamp(level, 1, REWARD_COUNT);
       this.resultOverlay.add(this.add.text(WIDTH / 2, 300, `LEVEL ${rewardNumber} REWARD UNLOCKED`, {
         fontFamily: 'Verdana',
@@ -1028,6 +1388,16 @@ class PegFanScene extends Phaser.Scene {
         this.showRewardViewer(rewardNumber, 'game');
       }, { fill: 0x4a3d21, stroke: COLORS.gold, size: 21 });
       this.resultOverlay.add([expand.rect, expand.text]);
+    }
+
+    if (isEditorTest) {
+      this.resultOverlay.add(this.add.text(WIDTH / 2, 312, 'この配置をベースに、形状やパーツ種別を変えて量産できます。', {
+        fontFamily: 'Meiryo, Verdana',
+        fontSize: 22,
+        color: COLORS.muted,
+        align: 'center',
+        wordWrap: { width: 610 },
+      }).setOrigin(0.5));
     }
 
     if (canContinue) {
@@ -1051,12 +1421,18 @@ class PegFanScene extends Phaser.Scene {
       }).setOrigin(0.5));
     }
 
-    const next = Math.min(TOTAL_LEVELS, level + 1);
-    const y = success ? 1032 : canContinue ? HEIGHT / 2 + 178 : HEIGHT / 2 + 48;
-    const retry = this.button(WIDTH / 2 - 185, y, 260, 64, success && level < TOTAL_LEVELS ? '次へ' : '再挑戦', () => this.startLevel(success && level < TOTAL_LEVELS ? next : level), { fill: 0x2c6f84 });
-    const select = this.button(WIDTH / 2 + 185, y, 260, 64, '選択へ', () => this.showLevelSelect());
-    const gallery = this.button(WIDTH / 2, y + 90, 300, 58, 'ギャラリー', () => this.showGallery(), { fill: 0x4a3d21, stroke: COLORS.gold });
-    this.resultOverlay.add([retry.rect, retry.text, select.rect, select.text, gallery.rect, gallery.text]);
+    if (isEditorTest) {
+      const retry = this.button(WIDTH / 2 - 185, HEIGHT / 2 + 92, 260, 64, 'RETEST', () => this.startEditorTest(), { fill: 0x2c6f84 });
+      const edit = this.button(WIDTH / 2 + 185, HEIGHT / 2 + 92, 260, 64, 'EDITOR', () => this.showStageEditor(), { fill: 0x334155, stroke: 0x93c5fd });
+      this.resultOverlay.add([retry.rect, retry.text, edit.rect, edit.text]);
+    } else {
+      const next = Math.min(TOTAL_LEVELS, level + 1);
+      const y = success ? 1032 : canContinue ? HEIGHT / 2 + 178 : HEIGHT / 2 + 48;
+      const retry = this.button(WIDTH / 2 - 185, y, 260, 64, success && level < TOTAL_LEVELS ? '次へ' : '再挑戦', () => this.startLevel(success && level < TOTAL_LEVELS ? next : level), { fill: 0x2c6f84 });
+      const select = this.button(WIDTH / 2 + 185, y, 260, 64, '選択へ', () => this.showLevelSelect());
+      const gallery = this.button(WIDTH / 2, y + 90, 300, 58, 'ギャラリー', () => this.showGallery(), { fill: 0x4a3d21, stroke: COLORS.gold });
+      this.resultOverlay.add([retry.rect, retry.text, select.rect, select.text, gallery.rect, gallery.text]);
+    }
   }
 
   showRewardedAd() {
