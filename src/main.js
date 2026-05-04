@@ -303,6 +303,7 @@ class PegFanScene extends Phaser.Scene {
   create() {
     this.save = loadSave();
     this.matterBodies = [];
+    this.input.setTopOnly(true);
     this.matter.world.setBounds(36, 0, WIDTH - 72, HEIGHT + 180, 64, true, true, true, false);
     this.matter.world.on('collisionstart', (event) => this.handleMatterCollision(event));
     this.input.keyboard?.on('keydown-SPACE', () => this.launchBall());
@@ -319,11 +320,16 @@ class PegFanScene extends Phaser.Scene {
   }
 
   clearScene() {
+    this.time.removeAllEvents();
+    this.tweens.killAll();
+    this.children.list.slice().forEach((child) => {
+      child.disableInteractive?.();
+      child.removeAllListeners?.();
+    });
     this.matterBodies?.forEach((body) => {
       if (body) this.matter.world.remove(body, true);
     });
     this.matterBodies = [];
-    this.children.removeAll();
     this.balls?.clear(true, true);
     this.pegGroup?.clear(true, true);
     this.brickGroup?.clear(true, true);
@@ -334,7 +340,26 @@ class PegFanScene extends Phaser.Scene {
     this.spinnerGraphics?.destroy();
     this.bucketVisual?.destroy(true);
     this.blockVisuals?.forEach((item) => item.destroy());
+    this.resultOverlay?.destroy(true);
+    this.rewardOverlay?.destroy(true);
+    this.adOverlay?.destroy(true);
+    this.children.removeAll(true);
     this.blockVisuals = [];
+    this.balls = null;
+    this.pegGroup = null;
+    this.brickGroup = null;
+    this.railGroup = null;
+    this.timedBlockGroup = null;
+    this.bumperGroup = null;
+    this.spinnerNodeGroup = null;
+    this.spinnerNodes = [];
+    this.spinnerGraphics = null;
+    this.bucketVisual = null;
+    this.bucket = null;
+    this.resultOverlay = null;
+    this.rewardOverlay = null;
+    this.adOverlay = null;
+    this.trajectory = null;
   }
 
   addBackground(title = 'PEG FAN') {
