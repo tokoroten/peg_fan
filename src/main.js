@@ -312,11 +312,14 @@ class PegFanScene extends Phaser.Scene {
   create() {
     this.save = loadSave();
     this.matterBodies = [];
+    this.editorHistory = [];
+    this.editorRedo = [];
     this.input.setTopOnly(true);
     this.matter.world.setBounds(36, 0, WIDTH - 72, HEIGHT + 180, 64, true, true, true, false);
     this.matter.world.on('collisionstart', (event) => this.handleMatterCollision(event));
     this.input.keyboard?.on('keydown-SPACE', () => this.launchBall());
     this.input.keyboard?.on('keydown-ESC', () => this.showMenu());
+    this.input.keyboard?.on('keydown-Z', (event) => this.handleEditorUndoShortcut(event));
     this.showMenu();
   }
 
@@ -614,7 +617,7 @@ class PegFanScene extends Phaser.Scene {
     this.add.text(458, 1050, state.mode === 'manual' ? `GRID ${EDITOR_GRID}` : `TURNS ${state.turns}`, { fontFamily: 'Verdana', fontSize: 18, color: COLORS.text });
     this.add.text(638, 1050, `BALLS ${state.balls}`, { fontFamily: 'Verdana', fontSize: 18, color: COLORS.text });
 
-    this.button(95, 1102, 62, 42, state.mode === 'manual' ? 'UNDO' : '-8', () => (state.mode === 'manual' ? this.undoManualObject() : adjust('count', -8)), { size: 15 });
+    this.button(95, 1102, 62, 42, state.mode === 'manual' ? 'UNDO' : '-8', () => (state.mode === 'manual' ? this.undoEditorHistory() : adjust('count', -8)), { size: 15 });
     this.button(170, 1102, 62, 42, state.mode === 'manual' ? 'ORNG' : '+8', () => (state.mode === 'manual' ? this.setManualType('orange') : adjust('count', 8)), { size: 15 });
     this.button(278, 1102, 62, 42, state.mode === 'manual' ? 'BLUE' : '-20', () => (state.mode === 'manual' ? this.setManualType('blue') : adjust('radius', -20)), { size: 15 });
     this.button(354, 1102, 62, 42, state.mode === 'manual' ? 'GREEN' : '+20', () => (state.mode === 'manual' ? this.setManualType('green') : adjust('radius', 20)), { size: 13 });
@@ -676,6 +679,63 @@ class PegFanScene extends Phaser.Scene {
     });
   }
 
+  cloneManualObjects(objects = this.editorState?.manualObjects ?? []) {
+    return objects.map((object) => ({ ...object }));
+  }
+
+  manualObjectsEqual(a, b) {
+    if (a.length !== b.length) return false;
+    return JSON.stringify(a) === JSON.stringify(b);
+  }
+
+  setManualObjects(nextObjects, { record = true } = {}) {
+    const current = this.cloneManualObjects();
+    const next = this.cloneManualObjects(nextObjects).slice(-240);
+    if (this.manualObjectsEqual(current, next)) return false;
+    if (record) {
+      this.editorHistory = [...(this.editorHistory ?? []), current].slice(-80);
+      this.editorRedo = [];
+    }
+    this.editorState.manualObjects = next;
+    saveEditorState(this.editorState);
+    return true;
+  }
+
+  undoEditorHistory() {
+    if (this.view !== 'editor' || this.editorState?.mode !== 'manual') return;
+    if (!this.editorHistory?.length) {
+      this.editorToast('NO UNDO');
+      return;
+    }
+    const current = this.cloneManualObjects();
+    const previous = this.editorHistory.pop();
+    this.editorRedo = [...(this.editorRedo ?? []), current].slice(-80);
+    this.setManualObjects(previous, { record: false });
+    this.showStageEditor();
+  }
+
+  redoEditorHistory() {
+    if (this.view !== 'editor' || this.editorState?.mode !== 'manual') return;
+    if (!this.editorRedo?.length) {
+      this.editorToast('NO REDO');
+      return;
+    }
+    const current = this.cloneManualObjects();
+    const next = this.editorRedo.pop();
+    this.editorHistory = [...(this.editorHistory ?? []), current].slice(-80);
+    this.setManualObjects(next, { record: false });
+    this.showStageEditor();
+  }
+
+  handleEditorUndoShortcut(event) {
+    const isModifier = event?.ctrlKey || event?.metaKey;
+    if (!isModifier || this.view !== 'editor' || this.editorState?.mode !== 'manual') return;
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    if (event.shiftKey) this.redoEditorHistory();
+    else this.undoEditorHistory();
+  }
+
   setManualType(type) {
     this.editorState.type = type;
     saveEditorState(this.editorState);
@@ -689,14 +749,7 @@ class PegFanScene extends Phaser.Scene {
   }
 
   clearManualEditor() {
-    this.editorState.manualObjects = [];
-    saveEditorState(this.editorState);
-    this.showStageEditor();
-  }
-
-  undoManualObject() {
-    this.editorState.manualObjects = this.editorState.manualObjects.slice(0, -1);
-    saveEditorState(this.editorState);
+    this.setManualObjects([]);
     this.showStageEditor();
   }
 
@@ -718,9 +771,7 @@ class PegFanScene extends Phaser.Scene {
   }
 
   addManualObject(object) {
-    const next = [...this.editorState.manualObjects, object].slice(-240);
-    this.editorState.manualObjects = next;
-    saveEditorState(this.editorState);
+    this.setManualObjects([...this.editorState.manualObjects, object]);
   }
 
   createManualSingle(point) {
@@ -755,13 +806,11 @@ class PegFanScene extends Phaser.Scene {
       if (tool === 'rail') objects.push({ kind: 'rail', x, y, w: 120, h: 13, angle });
       if (tool === 'bumper') objects.push({ kind: 'bumper', x, y, r: 28 });
     }
-    this.editorState.manualObjects = [...this.editorState.manualObjects, ...objects].slice(-240);
-    saveEditorState(this.editorState);
+    this.setManualObjects([...this.editorState.manualObjects, ...objects]);
   }
 
   eraseManualNear(point, radius = 38) {
-    this.editorState.manualObjects = this.editorState.manualObjects.filter((object) => Math.hypot(object.x - point.x, object.y - point.y) > radius);
-    saveEditorState(this.editorState);
+    this.setManualObjects(this.editorState.manualObjects.filter((object) => Math.hypot(object.x - point.x, object.y - point.y) > radius));
   }
 
   eraseManualLine(start, end) {
@@ -769,10 +818,14 @@ class PegFanScene extends Phaser.Scene {
     const dy = end.y - start.y;
     const distance = Math.hypot(dx, dy);
     const steps = Math.max(2, Math.ceil(distance / EDITOR_GRID));
+    const erasePoints = [];
     for (let i = 0; i <= steps; i += 1) {
       const t = i / steps;
-      this.eraseManualNear({ x: start.x + dx * t, y: start.y + dy * t }, 34);
+      erasePoints.push({ x: start.x + dx * t, y: start.y + dy * t });
     }
+    this.setManualObjects(this.editorState.manualObjects.filter((object) => (
+      erasePoints.every((point) => Math.hypot(object.x - point.x, object.y - point.y) > 34)
+    )));
   }
 
   handleManualPointerDown(pointer) {
