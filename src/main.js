@@ -42,6 +42,8 @@ const EDITOR_TYPES = ['auto', 'orange', 'blue', 'green', 'purple'];
 const EDITOR_MODES = ['procedural', 'manual'];
 const EDITOR_MANUAL_TOOLS = ['peg', 'brick', 'rail', 'bumper', 'erase'];
 const EDITOR_GRID = 32;
+const MANUAL_BRICK_THICKNESS = 18;
+const MANUAL_RAIL_THICKNESS = 13;
 
 const COLORS = {
   panel: 0x141b2a,
@@ -82,6 +84,7 @@ function loadEditorState() {
     balls: 10,
     mode: 'procedural',
     manualTool: 'peg',
+    gridSnap: false,
     manualObjects: [],
   };
   try {
@@ -105,8 +108,83 @@ function clampEditorState(state) {
     balls: Phaser.Math.Clamp(Math.round(state.balls), 5, 18),
     mode: EDITOR_MODES.includes(state.mode) ? state.mode : 'procedural',
     manualTool: EDITOR_MANUAL_TOOLS.includes(state.manualTool) ? state.manualTool : 'peg',
+    gridSnap: Boolean(state.gridSnap),
     manualObjects: Array.isArray(state.manualObjects) ? state.manualObjects.slice(0, 240) : [],
   };
+}
+
+function clonePlain(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function centerOfPoints(points) {
+  return points.reduce((sum, point) => ({ x: sum.x + point.x / points.length, y: sum.y + point.y / points.length }), { x: 0, y: 0 });
+}
+
+function quadFromCenter(x, y, width, height, angle = 0, skew = 0, taper = 0) {
+  const halfW = Math.max(4, width) / 2;
+  const halfH = Math.max(4, height) / 2;
+  const topW = halfW * Phaser.Math.Clamp(1 - taper, 0.25, 1.75);
+  const bottomW = halfW * Phaser.Math.Clamp(1 + taper, 0.25, 1.75);
+  const local = [
+    { x: -topW + skew, y: -halfH },
+    { x: topW + skew, y: -halfH },
+    { x: bottomW - skew, y: halfH },
+    { x: -bottomW - skew, y: halfH },
+  ];
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return local.map((point) => ({
+    x: x + point.x * cos - point.y * sin,
+    y: y + point.x * sin + point.y * cos,
+  }));
+}
+
+function segmentQuad(start, end, thickness, overlap = 0) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const length = Math.hypot(dx, dy) || 1;
+  const ux = dx / length;
+  const uy = dy / length;
+  const nx = -uy * thickness / 2;
+  const ny = ux * thickness / 2;
+  const sx = start.x - ux * overlap;
+  const sy = start.y - uy * overlap;
+  const ex = end.x + ux * overlap;
+  const ey = end.y + uy * overlap;
+  return [
+    { x: sx + nx, y: sy + ny },
+    { x: ex + nx, y: ey + ny },
+    { x: ex - nx, y: ey - ny },
+    { x: sx - nx, y: sy - ny },
+  ];
+}
+
+function normalizeQuad(data) {
+  if (Array.isArray(data?.vertices) && data.vertices.length >= 4) {
+    return data.vertices.slice(0, 4).map((point) => ({ x: Number(point.x), y: Number(point.y) }));
+  }
+  return quadFromCenter(data.x, data.y, data.w ?? 80, data.h ?? 16, data.angle ?? 0, data.skew ?? 0, data.taper ?? 0);
+}
+
+function edgeDistance(point, a, b) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lengthSq = dx * dx + dy * dy || 1;
+  const t = Phaser.Math.Clamp(((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSq, 0, 1);
+  const px = a.x + dx * t;
+  const py = a.y + dy * t;
+  return { distance: Math.hypot(point.x - px, point.y - py), px, py };
+}
+
+function pointInPolygon(point, vertices) {
+  let inside = false;
+  for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i, i += 1) {
+    const a = vertices[i];
+    const b = vertices[j];
+    if (((a.y > point.y) !== (b.y > point.y)) && (point.x < ((b.x - a.x) * (point.y - a.y)) / ((b.y - a.y) || 1) + a.x)) inside = !inside;
+  }
+  return inside;
 }
 
 function seededRandom(seed) {
@@ -607,14 +685,14 @@ class PegFanScene extends Phaser.Scene {
 
     this.button(88, 988, 86, 46, 'MODE', () => cycle('mode', EDITOR_MODES), { size: 15, fill: state.mode === 'manual' ? 0x6b4b18 : 0x1f3a5f, stroke: state.mode === 'manual' ? COLORS.gold : 0x45526a });
     this.button(190, 988, 86, 46, state.mode === 'manual' ? 'TOOL' : 'SHAPE', () => cycle(state.mode === 'manual' ? 'manualTool' : 'shape', state.mode === 'manual' ? EDITOR_MANUAL_TOOLS : EDITOR_SHAPES), { size: 15, fill: 0x1f3a5f });
-    this.button(292, 988, 86, 46, 'PART', () => cycle('part', EDITOR_PARTS), { size: 15, fill: 0x1f3a5f, disabled: state.mode === 'manual' });
+    this.button(292, 988, 86, 46, state.mode === 'manual' ? 'SNAP' : 'PART', () => (state.mode === 'manual' ? this.toggleGridSnap() : cycle('part', EDITOR_PARTS)), { size: 15, fill: state.mode === 'manual' && state.gridSnap ? 0x6b4b18 : 0x1f3a5f, stroke: state.mode === 'manual' && state.gridSnap ? COLORS.gold : 0x45526a });
     this.button(394, 988, 86, 46, 'TYPE', () => cycle('type', EDITOR_TYPES), { size: 15, fill: 0x1f3a5f });
     this.button(508, 988, 118, 46, state.mode === 'manual' ? 'CLEAR' : 'RANDOM', () => (state.mode === 'manual' ? this.clearManualEditor() : this.randomizeEditor()), { size: 15, fill: 0x3f2f56, stroke: 0xc084fc });
     this.button(686, 988, 200, 46, 'TEST PLAY', () => this.startEditorTest(), { size: 18, fill: 0x2c6f84, stroke: 0x5eead4 });
 
     this.add.text(78, 1050, state.mode === 'manual' ? `MODE ${state.mode.toUpperCase()}` : `COUNT ${state.count}`, { fontFamily: 'Verdana', fontSize: 18, color: COLORS.text });
     this.add.text(258, 1050, state.mode === 'manual' ? `TOOL ${state.manualTool.toUpperCase()}` : `RADIUS ${state.radius}`, { fontFamily: 'Verdana', fontSize: 18, color: COLORS.text });
-    this.add.text(458, 1050, state.mode === 'manual' ? `GRID ${EDITOR_GRID}` : `TURNS ${state.turns}`, { fontFamily: 'Verdana', fontSize: 18, color: COLORS.text });
+    this.add.text(458, 1050, state.mode === 'manual' ? `SNAP ${state.gridSnap ? 'ON' : 'OFF'}` : `TURNS ${state.turns}`, { fontFamily: 'Verdana', fontSize: 18, color: COLORS.text });
     this.add.text(638, 1050, `BALLS ${state.balls}`, { fontFamily: 'Verdana', fontSize: 18, color: COLORS.text });
 
     this.button(95, 1102, 62, 42, state.mode === 'manual' ? 'UNDO' : '-8', () => (state.mode === 'manual' ? this.undoEditorHistory() : adjust('count', -8)), { size: 15 });
@@ -680,7 +758,7 @@ class PegFanScene extends Phaser.Scene {
   }
 
   cloneManualObjects(objects = this.editorState?.manualObjects ?? []) {
-    return objects.map((object) => ({ ...object }));
+    return clonePlain(objects);
   }
 
   manualObjectsEqual(a, b) {
@@ -748,6 +826,12 @@ class PegFanScene extends Phaser.Scene {
     this.showStageEditor();
   }
 
+  toggleGridSnap() {
+    this.editorState.gridSnap = !this.editorState.gridSnap;
+    saveEditorState(this.editorState);
+    this.showStageEditor();
+  }
+
   clearManualEditor() {
     this.setManualObjects([]);
     this.showStageEditor();
@@ -760,9 +844,11 @@ class PegFanScene extends Phaser.Scene {
   snapEditorPoint(pointer) {
     const bounds = this.editorBounds();
     const world = this.getPointerWorld(pointer);
+    const x = this.editorState.gridSnap ? Math.round(world.x / EDITOR_GRID) * EDITOR_GRID : world.x;
+    const y = this.editorState.gridSnap ? Math.round(world.y / EDITOR_GRID) * EDITOR_GRID : world.y;
     return {
-      x: Phaser.Math.Clamp(Math.round(world.x / EDITOR_GRID) * EDITOR_GRID, bounds.left, bounds.right),
-      y: Phaser.Math.Clamp(Math.round(world.y / EDITOR_GRID) * EDITOR_GRID, bounds.top, bounds.bottom),
+      x: Phaser.Math.Clamp(x, bounds.left, bounds.right),
+      y: Phaser.Math.Clamp(y, bounds.top, bounds.bottom),
     };
   }
 
@@ -778,8 +864,8 @@ class PegFanScene extends Phaser.Scene {
     const tool = this.editorState.manualTool;
     const type = this.manualType();
     if (tool === 'peg') this.addManualObject({ kind: 'peg', x: point.x, y: point.y, type });
-    if (tool === 'brick') this.addManualObject({ kind: 'brick', x: point.x, y: point.y, w: 88, h: 18, angle: 0, type });
-    if (tool === 'rail') this.addManualObject({ kind: 'rail', x: point.x, y: point.y, w: 128, h: 13, angle: 0 });
+    if (tool === 'brick') this.addManualObject({ kind: 'brick', vertices: quadFromCenter(point.x, point.y, 88, MANUAL_BRICK_THICKNESS, 0), type });
+    if (tool === 'rail') this.addManualObject({ kind: 'rail', vertices: quadFromCenter(point.x, point.y, 128, MANUAL_RAIL_THICKNESS, 0) });
     if (tool === 'bumper') this.addManualObject({ kind: 'bumper', x: point.x, y: point.y, r: 28 });
   }
 
@@ -793,24 +879,36 @@ class PegFanScene extends Phaser.Scene {
     }
     const tool = this.editorState.manualTool;
     const type = this.manualType();
-    const angle = Math.atan2(dy, dx);
     const spacing = tool === 'peg' ? 38 : tool === 'bumper' ? 58 : tool === 'rail' ? 96 : 74;
-    const count = Phaser.Math.Clamp(Math.floor(distance / spacing) + 1, 2, 48);
     const objects = [];
+    if (tool === 'brick') {
+      objects.push({ kind: 'brick', vertices: segmentQuad(start, end, MANUAL_BRICK_THICKNESS, 3), type });
+      this.setManualObjects([...this.editorState.manualObjects, ...objects]);
+      return;
+    }
+    if (tool === 'rail') {
+      objects.push({ kind: 'rail', vertices: segmentQuad(start, end, MANUAL_RAIL_THICKNESS, 3) });
+      this.setManualObjects([...this.editorState.manualObjects, ...objects]);
+      return;
+    }
+    const count = Phaser.Math.Clamp(Math.floor(distance / spacing) + 1, 2, 48);
     for (let i = 0; i < count; i += 1) {
       const t = count === 1 ? 0 : i / (count - 1);
-      const x = Math.round((start.x + dx * t) / EDITOR_GRID) * EDITOR_GRID;
-      const y = Math.round((start.y + dy * t) / EDITOR_GRID) * EDITOR_GRID;
+      const rawX = start.x + dx * t;
+      const rawY = start.y + dy * t;
+      const x = this.editorState.gridSnap ? Math.round(rawX / EDITOR_GRID) * EDITOR_GRID : rawX;
+      const y = this.editorState.gridSnap ? Math.round(rawY / EDITOR_GRID) * EDITOR_GRID : rawY;
       if (tool === 'peg') objects.push({ kind: 'peg', x, y, type });
-      if (tool === 'brick') objects.push({ kind: 'brick', x, y, w: 82, h: 18, angle, type });
-      if (tool === 'rail') objects.push({ kind: 'rail', x, y, w: 120, h: 13, angle });
       if (tool === 'bumper') objects.push({ kind: 'bumper', x, y, r: 28 });
     }
     this.setManualObjects([...this.editorState.manualObjects, ...objects]);
   }
 
   eraseManualNear(point, radius = 38) {
-    this.setManualObjects(this.editorState.manualObjects.filter((object) => Math.hypot(object.x - point.x, object.y - point.y) > radius));
+    this.setManualObjects(this.editorState.manualObjects.filter((object) => {
+      const center = this.objectCenter(object);
+      return Math.hypot(center.x - point.x, center.y - point.y) > radius;
+    }));
   }
 
   eraseManualLine(start, end) {
@@ -824,7 +922,10 @@ class PegFanScene extends Phaser.Scene {
       erasePoints.push({ x: start.x + dx * t, y: start.y + dy * t });
     }
     this.setManualObjects(this.editorState.manualObjects.filter((object) => (
-      erasePoints.every((point) => Math.hypot(object.x - point.x, object.y - point.y) > 34)
+      erasePoints.every((point) => {
+        const center = this.objectCenter(object);
+        return Math.hypot(center.x - point.x, center.y - point.y) > 34;
+      })
     )));
   }
 
@@ -862,7 +963,7 @@ class PegFanScene extends Phaser.Scene {
   renderManualGrid() {
     const bounds = this.editorBounds();
     const grid = this.add.graphics().setDepth(2);
-    grid.lineStyle(1, 0x334155, 0.32);
+    grid.lineStyle(1, 0x334155, this.editorState.gridSnap ? 0.34 : 0.14);
     for (let x = bounds.left; x <= bounds.right; x += EDITOR_GRID) grid.lineBetween(x, bounds.top, x, bounds.bottom);
     for (let y = bounds.top; y <= bounds.bottom; y += EDITOR_GRID) grid.lineBetween(bounds.left, y, bounds.right, y);
     grid.lineStyle(2, COLORS.gold, 0.32);
@@ -884,6 +985,11 @@ class PegFanScene extends Phaser.Scene {
     });
   }
 
+  objectCenter(object) {
+    if (Array.isArray(object.vertices) && object.vertices.length >= 4) return centerOfPoints(object.vertices);
+    return { x: object.x, y: object.y };
+  }
+
   buildManualLevel() {
     const pegs = [];
     const bricks = [];
@@ -891,8 +997,8 @@ class PegFanScene extends Phaser.Scene {
     const bumpers = [];
     this.editorState.manualObjects.forEach((object) => {
       if (object.kind === 'peg') pegs.push({ x: object.x, y: object.y, type: object.type ?? 'blue' });
-      if (object.kind === 'brick') bricks.push({ x: object.x, y: object.y, w: object.w ?? 88, h: object.h ?? 18, angle: object.angle ?? 0, type: object.type ?? 'blue' });
-      if (object.kind === 'rail') rails.push({ x: object.x, y: object.y, w: object.w ?? 128, h: object.h ?? 13, angle: object.angle ?? 0 });
+      if (object.kind === 'brick') bricks.push({ ...object, vertices: normalizeQuad(object), type: object.type ?? 'blue' });
+      if (object.kind === 'rail') rails.push({ ...object, vertices: normalizeQuad(object) });
       if (object.kind === 'bumper') bumpers.push({ x: object.x, y: object.y, r: object.r ?? 28 });
     });
     if (!pegs.some((peg) => peg.type === 'orange') && !bricks.some((brick) => brick.type === 'orange')) {
@@ -928,7 +1034,7 @@ class PegFanScene extends Phaser.Scene {
       let angle = 0;
       if (s.shape === 'circle') {
         angle = (i / count) * Math.PI * 2;
-        const ring = i % 2 ? 0.72 : 1;
+        const ring = (s.part === 'bricks' || s.part === 'rails') ? 1 : (i % 2 ? 0.72 : 1);
         x = centerX + Math.cos(angle) * s.radius * ring;
         y = centerY + Math.sin(angle) * s.radius * 0.72 * ring;
       } else if (s.shape === 'spiral') {
@@ -987,30 +1093,36 @@ class PegFanScene extends Phaser.Scene {
     const useBricks = s.part === 'mixed' || s.part === 'bricks';
     const useRails = s.part === 'mixed' || s.part === 'rails';
     const useBumpers = s.part === 'mixed' || s.part === 'bumpers';
+    const addSegmentParts = (kind, step, thickness, overlap) => {
+      if (points.length < 2) return;
+      const closed = s.shape === 'circle';
+      const limit = closed ? points.length : points.length - 1;
+      for (let index = 0; index < limit; index += step) {
+        const a = points[index];
+        const b = points[(index + 1) % points.length];
+        if (!b || Math.hypot(b.x - a.x, b.y - a.y) > 180) continue;
+        const vertices = segmentQuad(a, b, thickness, overlap);
+        if (kind === 'brick') bricks.push({ vertices, type: this.editorPegType(index + 2) });
+        else rails.push({ vertices });
+      }
+    };
+
+    if (useBricks) addSegmentParts('brick', s.part === 'bricks' ? 1 : 9, 19, s.part === 'bricks' ? 4 : 2);
+    if (useRails) addSegmentParts('rail', s.part === 'rails' ? 1 : 13, 13, s.part === 'rails' ? 4 : 2);
 
     points.forEach((point, index) => {
       if (usePegs && (s.part !== 'mixed' || index % 3 !== 1)) {
         pegs.push({ x: point.x, y: point.y, type: this.editorPegType(index) });
-      }
-      if (useBricks && index % (s.part === 'bricks' ? 2 : 9) === 0) {
-        bricks.push({
-          x: point.x,
-          y: point.y,
-          w: 72 + (index % 4) * 16,
-          h: 18,
-          angle: point.angle,
-          type: this.editorPegType(index + 2),
-        });
-      }
-      if (useRails && index % (s.part === 'rails' ? 3 : 13) === 0) {
-        rails.push({ x: point.x, y: point.y, w: 116, h: 13, angle: point.angle + Math.PI / 2 });
       }
       if (useBumpers && index % (s.part === 'bumpers' ? 4 : 17) === 0) {
         bumpers.push({ x: point.x, y: point.y, r: 24 + (index % 3) * 4 });
       }
     });
 
-    if (!pegs.some((peg) => peg.type === 'orange') && pegs.length) pegs[0].type = 'orange';
+    if (!pegs.some((peg) => peg.type === 'orange') && !bricks.some((brick) => brick.type === 'orange')) {
+      if (pegs.length) pegs[0].type = 'orange';
+      else if (bricks.length) bricks[0].type = 'orange';
+    }
     if (s.part === 'mixed') {
       timedBlocks.push({ x: 450, y: 830, w: 210, h: 22, phase: 0, period: 2800 });
       spinners.push({ x: 450, y: 560, radius: 58, speed: 0.9, phase: 0 });
@@ -1031,6 +1143,16 @@ class PegFanScene extends Phaser.Scene {
     };
   }
 
+  addQuadVisual(data, fillColor, fillAlpha = 1, strokeColor = 0xffffff, strokeAlpha = 0.28, strokeWidth = 3) {
+    const vertices = normalizeQuad(data);
+    const center = centerOfPoints(vertices);
+    const local = vertices.flatMap((point) => [point.x - center.x, point.y - center.y]);
+    const visual = this.add.polygon(center.x, center.y, local, fillColor, fillAlpha)
+      .setStrokeStyle(strokeWidth, strokeColor, strokeAlpha);
+    visual.quadVertices = vertices;
+    return visual;
+  }
+
   renderEditorPreview() {
     const level = this.buildEditorLevel();
     const panel = this.add.rectangle(WIDTH / 2, 548, 812, 690, 0x0b111b, 0.78).setStrokeStyle(2, 0x243044);
@@ -1046,12 +1168,10 @@ class PegFanScene extends Phaser.Scene {
     });
     level.bricks.forEach((brick) => {
       const color = brick.type === 'orange' ? COLORS.orange : brick.type === 'green' ? COLORS.green : COLORS.blue;
-      const rect = this.add.rectangle(brick.x, brick.y, brick.w, brick.h, color, 0.9).setStrokeStyle(2, 0xffffff, 0.25).setDepth(3);
-      rect.rotation = brick.angle;
+      this.addQuadVisual(brick, color, 0.9, 0xffffff, 0.25, 2).setDepth(3);
     });
     level.rails.forEach((rail) => {
-      const rect = this.add.rectangle(rail.x, rail.y, rail.w, rail.h, 0x8ea2c7, 0.36).setStrokeStyle(2, 0xdbeafe, 0.45).setDepth(3);
-      rect.rotation = rail.angle;
+      this.addQuadVisual(rail, 0x8ea2c7, 0.36, 0xdbeafe, 0.45, 2).setDepth(3);
     });
     level.timedBlocks.forEach((block) => {
       this.add.rectangle(block.x, block.y, block.w, block.h, 0x38bdf8, 0.5).setStrokeStyle(2, 0xe0f2fe, 0.7).setDepth(3);
@@ -1064,16 +1184,16 @@ class PegFanScene extends Phaser.Scene {
       line.rotation = spinner.phase;
       this.add.circle(spinner.x, spinner.y, 10, 0xf8fafc, 0.3).setStrokeStyle(3, COLORS.gold).setDepth(4);
     });
-    this.add.text(78, 852, `OBJECTS ${level.pegs.length + level.bricks.length + level.rails.length + level.bumpers.length + level.timedBlocks.length + level.spinners.length}   ORANGE ${level.targetCount}`, {
+    this.add.text(78, 824, `OBJECTS ${level.pegs.length + level.bricks.length + level.rails.length + level.bumpers.length + level.timedBlocks.length + level.spinners.length}   ORANGE ${level.targetCount}`, {
       fontFamily: 'Verdana',
       fontSize: 20,
       fontStyle: '700',
       color: COLORS.text,
     }).setDepth(4);
     if (this.editorState.mode === 'manual') {
-      this.add.text(78, 876, 'CLICK: PLACE   DRAG: LINE   TOOL=ERASE: DELETE', {
+      this.add.text(78, 858, 'CLICK: PLACE   DRAG: LINE   SNAP: GRID ASSIST   TOOL=ERASE: DELETE', {
         fontFamily: 'Verdana',
-        fontSize: 14,
+        fontSize: 13,
         fontStyle: '700',
         color: '#93c5fd',
       }).setDepth(4);
@@ -1184,6 +1304,15 @@ class PegFanScene extends Phaser.Scene {
     return this.trackMatterBody(gameObject, bodyRole, extra);
   }
 
+  makeMatterPolygon(gameObject, vertices, bodyRole, options = {}, extra = {}) {
+    const center = centerOfPoints(vertices);
+    const body = this.matter.add.fromVertices(center.x, center.y, vertices, {
+      ...options,
+    }, true, 0.01, 10);
+    gameObject.body = body;
+    return this.trackMatterBody(gameObject, bodyRole, extra);
+  }
+
   setBodyVelocity(gameObject, x, y) {
     if (!gameObject?.body) return;
     if (gameObject.setVelocity) gameObject.setVelocity(x, y);
@@ -1242,11 +1371,10 @@ class PegFanScene extends Phaser.Scene {
     this.brickGroup = this.add.group();
     this.level.bricks.forEach((data) => {
       const color = data.type === 'orange' ? COLORS.orange : data.type === 'green' ? COLORS.green : COLORS.blue;
-      const visual = this.add.rectangle(data.x, data.y, data.w, data.h, color, 1).setStrokeStyle(3, 0xffffff, 0.28);
-      visual.rotation = data.angle;
-      this.makeMatterRectangle(visual, data.w, data.h, 'brick', {
+      const vertices = normalizeQuad(data);
+      const visual = this.addQuadVisual({ vertices }, color, 1, 0xffffff, 0.28, 3);
+      this.makeMatterPolygon(visual, vertices, 'brick', {
         isStatic: true,
-        angle: data.angle,
         restitution: 1,
         friction: 0,
       }, {
@@ -1260,11 +1388,10 @@ class PegFanScene extends Phaser.Scene {
   createRails() {
     this.railGroup = this.add.group();
     this.level.rails.forEach((data) => {
-      const visual = this.add.rectangle(data.x, data.y, data.w, data.h, 0x8ea2c7, 0.35).setStrokeStyle(2, 0xdbeafe, 0.45);
-      visual.rotation = data.angle;
-      this.makeMatterRectangle(visual, data.w, data.h, 'rail', {
+      const vertices = normalizeQuad(data);
+      const visual = this.addQuadVisual({ vertices }, 0x8ea2c7, 0.35, 0xdbeafe, 0.45, 2);
+      this.makeMatterPolygon(visual, vertices, 'rail', {
         isStatic: true,
-        angle: data.angle,
         restitution: 1,
         friction: 0,
       });
@@ -1413,6 +1540,7 @@ class PegFanScene extends Phaser.Scene {
   getTrajectoryPredictors() {
     const circles = [];
     const rects = [];
+    const polygons = [];
     const addCircle = (item, radius = 16) => {
       if (item?.active && item.visible !== false) circles.push({ x: item.x, y: item.y, r: radius });
     };
@@ -1420,15 +1548,15 @@ class PegFanScene extends Phaser.Scene {
     this.bumperGroup?.getChildren().forEach((bumper) => addCircle(bumper, (bumper.radius ?? 24) + 6));
     this.spinnerNodeGroup?.getChildren().forEach((node) => addCircle(node, (node.radius ?? 14) + 6));
     this.brickGroup?.getChildren().forEach((rect) => {
-      if (rect?.active && rect.visible !== false) rects.push({ x: rect.x, y: rect.y, w: rect.width + 18, h: rect.height + 18, angle: rect.rotation });
+      if (rect?.active && rect.visible !== false && Array.isArray(rect.quadVertices)) polygons.push({ vertices: rect.quadVertices, inflate: 9 });
     });
     this.railGroup?.getChildren().forEach((rect) => {
-      if (rect?.active && rect.visible !== false) rects.push({ x: rect.x, y: rect.y, w: rect.width + 18, h: rect.height + 18, angle: rect.rotation });
+      if (rect?.active && rect.visible !== false && Array.isArray(rect.quadVertices)) polygons.push({ vertices: rect.quadVertices, inflate: 9 });
     });
     this.timedBlockGroup?.getChildren().forEach((rect) => {
       if (rect?.active && rect.visible !== false && rect.body?.collisionFilter?.mask !== 0) rects.push({ x: rect.x, y: rect.y, w: rect.width + 16, h: rect.height + 16 });
     });
-    return { circles, rects };
+    return { circles, rects, polygons };
   }
 
   findTrajectoryHit(x, y, predictors) {
@@ -1437,6 +1565,24 @@ class PegFanScene extends Phaser.Scene {
       const dy = y - circle.y;
       const d = Math.hypot(dx, dy);
       if (d < circle.r) return { nx: dx / (d || 1), ny: dy / (d || 1) };
+    }
+    for (const polygon of predictors.polygons ?? []) {
+      const vertices = polygon.vertices;
+      if (!Array.isArray(vertices) || vertices.length < 3) continue;
+      const point = { x, y };
+      let closest = { distance: Infinity, nx: 0, ny: -1 };
+      for (let i = 0; i < vertices.length; i += 1) {
+        const a = vertices[i];
+        const b = vertices[(i + 1) % vertices.length];
+        const edge = edgeDistance(point, a, b);
+        if (edge.distance < closest.distance) {
+          const dx = x - edge.px;
+          const dy = y - edge.py;
+          const d = Math.hypot(dx, dy) || 1;
+          closest = { distance: edge.distance, nx: dx / d, ny: dy / d };
+        }
+      }
+      if (pointInPolygon(point, vertices) || closest.distance <= (polygon.inflate ?? 0)) return { nx: closest.nx, ny: closest.ny };
     }
     for (const rect of predictors.rects) {
       const angle = rect.angle ?? 0;
