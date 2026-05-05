@@ -90,16 +90,36 @@ const COLORS = {
 };
 
 function loadSave() {
-  const fallback = { unlockedLevel: 1, completedLevels: [], galleryUnlocked: 0, clearedAll: false };
+  const fallback = { unlockedLevel: 1, completedLevels: [], galleryUnlocked: 0, clearedAll: false, qaRuns: [] };
   try {
-    return { ...fallback, ...JSON.parse(localStorage.getItem(SAVE_KEY) || '{}') };
+    const parsed = { ...fallback, ...JSON.parse(localStorage.getItem(SAVE_KEY) || '{}') };
+    parsed.qaRuns = Array.isArray(parsed.qaRuns) ? parsed.qaRuns.slice(-300) : [];
+    return parsed;
   } catch {
     return fallback;
   }
 }
 
 function saveProgress(save) {
+  if (Array.isArray(save.qaRuns)) save.qaRuns = save.qaRuns.slice(-300);
   localStorage.setItem(SAVE_KEY, JSON.stringify(save));
+}
+
+function summarizeQaRuns(runs = []) {
+  const summary = new Map();
+  runs.forEach((run) => {
+    const level = Number(run.level);
+    if (!Number.isFinite(level)) return;
+    const item = summary.get(level) ?? { level, attempts: 0, clears: 0, fails: 0, continues: 0, shots: 0, score: 0 };
+    item.attempts += 1;
+    if (run.result === 'clear') item.clears += 1;
+    if (run.result === 'fail') item.fails += 1;
+    item.continues += run.continuesUsed ?? 0;
+    item.shots += run.shotsFired ?? 0;
+    item.score += run.score ?? 0;
+    summary.set(level, item);
+  });
+  return summary;
 }
 
 function loadEditorState() {
@@ -822,6 +842,26 @@ class PegFanScene extends Phaser.Scene {
         shadow: false,
       });
     }
+    const qa = this.getQaSummary();
+    this.addLabel(86, 1042, `QA RUNS ${qa.totalRuns}   CLEAR ${(qa.clearRate * 100).toFixed(0)}%   AVG SHOTS ${qa.avgShots.toFixed(1)}   CONTINUE ${qa.continues}`, {
+      family: 'Verdana',
+      size: 16,
+      color: '#93c5fd',
+      shadow: false,
+    });
+  }
+
+  getQaSummary() {
+    const runs = this.save.qaRuns ?? [];
+    const clears = runs.filter((run) => run.result === 'clear').length;
+    const shots = runs.reduce((sum, run) => sum + (run.shotsFired ?? 0), 0);
+    const continues = runs.reduce((sum, run) => sum + (run.continuesUsed ?? 0), 0);
+    return {
+      totalRuns: runs.length,
+      clearRate: runs.length ? clears / runs.length : 0,
+      avgShots: runs.length ? shots / runs.length : 0,
+      continues,
+    };
   }
 
   showLevelSelect() {
@@ -1240,9 +1280,10 @@ class PegFanScene extends Phaser.Scene {
   }
 
   collectStageAudits() {
+    const qaByLevel = summarizeQaRuns(this.save.qaRuns ?? []);
     return Array.from({ length: TOTAL_LEVELS }, (_, index) => {
       const levelNumber = index + 1;
-      return auditLevelData(this.getPlayableLevel(levelNumber));
+      return { ...auditLevelData(this.getPlayableLevel(levelNumber)), qa: qaByLevel.get(levelNumber) ?? null };
     });
   }
 
@@ -1251,6 +1292,7 @@ class PegFanScene extends Phaser.Scene {
     const flagged = audits.filter((audit) => audit.flags.length);
     const avgTargets = audits.reduce((sum, audit) => sum + audit.targetCount, 0) / audits.length;
     const avgObjects = audits.reduce((sum, audit) => sum + audit.objects, 0) / audits.length;
+    const qaRuns = audits.reduce((sum, audit) => sum + (audit.qa?.attempts ?? 0), 0);
     const overlay = this.add.container(0, 0).setDepth(80);
     overlay.add(this.add.rectangle(WIDTH / 2, HEIGHT / 2, 760, 850, 0x0b111b, 0.97).setStrokeStyle(2, COLORS.cyan));
     overlay.add(this.add.text(WIDTH / 2, 260, 'STAGE AUDIT', {
@@ -1259,13 +1301,13 @@ class PegFanScene extends Phaser.Scene {
       fontStyle: '700',
       color: '#34d3e5',
     }).setOrigin(0.5));
-    overlay.add(this.add.text(WIDTH / 2, 328, `AVG OBJECTS ${avgObjects.toFixed(1)}   AVG ORANGE ${avgTargets.toFixed(1)}   FLAGGED ${flagged.length}`, {
+    overlay.add(this.add.text(WIDTH / 2, 328, `AVG OBJECTS ${avgObjects.toFixed(1)}   AVG ORANGE ${avgTargets.toFixed(1)}   FLAGGED ${flagged.length}   QA ${qaRuns}`, {
       fontFamily: 'Verdana',
       fontSize: 20,
       color: COLORS.text,
     }).setOrigin(0.5));
     const lines = (flagged.length ? flagged : audits.slice(0, 12)).slice(0, 18).map((audit) => (
-      `L${String(audit.level).padStart(3, '0')} ${audit.concept}  OBJ ${audit.objects}  ORG ${audit.targetCount}  BALL ${audit.balls}  ${audit.flags.join(',') || 'OK'}`
+      `L${String(audit.level).padStart(3, '0')} ${audit.concept}  OBJ ${audit.objects}  ORG ${audit.targetCount}  BALL ${audit.balls}  ${audit.qa ? `QA ${audit.qa.clears}/${audit.qa.attempts}` : 'QA -'}  ${audit.flags.join(',') || 'OK'}`
     ));
     overlay.add(this.add.text(110, 386, lines.join('\n'), {
       fontFamily: 'Consolas, Verdana',
@@ -1273,8 +1315,28 @@ class PegFanScene extends Phaser.Scene {
       lineSpacing: 8,
       color: flagged.length ? '#ffd35a' : '#dbeafe',
     }));
-    const close = this.button(WIDTH / 2, 1036, 240, 56, 'CLOSE', () => overlay.destroy(true), { fill: 0x263449, stroke: COLORS.cyan, size: 19 });
-    overlay.add(Object.values(close));
+    const exportQa = this.button(WIDTH / 2 - 150, 1036, 230, 56, 'EXPORT QA', () => this.exportQaRuns(), { fill: 0x1f3a5f, stroke: COLORS.cyan, size: 18 });
+    const close = this.button(WIDTH / 2 + 150, 1036, 230, 56, 'CLOSE', () => overlay.destroy(true), { fill: 0x263449, stroke: COLORS.cyan, size: 19 });
+    overlay.add([...Object.values(exportQa), ...Object.values(close)]);
+  }
+
+  exportQaRuns() {
+    const data = {
+      format: 'peg-fan-qa-runs',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      runs: this.save.qaRuns ?? [],
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `peg-fan-qa-runs-${Date.now()}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    this.editorToast('QA EXPORTED');
   }
 
   exportEditorJson() {
@@ -2021,6 +2083,16 @@ class PegFanScene extends Phaser.Scene {
     this.lastOrangeAnnounced = false;
     this.clearBonusAwarded = false;
     this.orangeClearCombo = 0;
+    this.currentRun = {
+      id: `${Date.now()}-${Math.floor(Math.random() * 100000)}`,
+      level: this.level.level,
+      concept: this.level.concept ?? 'custom',
+      startedAt: Date.now(),
+      shotsFired: 0,
+      continuesUsed: 0,
+      startBalls: this.level.balls,
+      startTargets: this.targetsLeft,
+    };
     this.shotCombo = 0;
     this.currentAim = { x: 0, y: 1 };
 
@@ -2438,6 +2510,7 @@ class PegFanScene extends Phaser.Scene {
     this.flashLaunch();
     this.playSfx('launch', { volume: 0.55 });
     this.shotsLeft -= 1;
+    if (this.currentRun) this.currentRun.shotsFired += 1;
     this.shotCombo = 0;
     this.refreshHud();
   }
@@ -2767,13 +2840,33 @@ class PegFanScene extends Phaser.Scene {
       }
       saveProgress(this.save);
     }
+    this.recordQaRun('clear');
     if (!this.orangeClearAnnounced) this.playSfx('clear', { volume: 0.82 });
     this.time.delayedCall(clearBonus > 0 ? 1050 : 550, () => this.showResult(true));
   }
 
   failLevel() {
+    this.recordQaRun('fail');
     this.playSfx('fail', { volume: 0.72 });
     this.time.delayedCall(450, () => this.showResult(false));
+  }
+
+  recordQaRun(result) {
+    if (!this.currentRun || this.level?.editorTest) return;
+    const run = {
+      ...this.currentRun,
+      result,
+      endedAt: Date.now(),
+      durationMs: Date.now() - this.currentRun.startedAt,
+      score: this.score,
+      targetsLeft: this.targetsLeft,
+      shotsLeft: this.shotsLeft,
+      continuesUsed: this.rewardedContinuesUsed,
+      clearedTargets: Math.max(0, (this.currentRun.startTargets ?? 0) - this.targetsLeft),
+    };
+    this.save.qaRuns = [...(this.save.qaRuns ?? []), run].slice(-300);
+    saveProgress(this.save);
+    this.currentRun = null;
   }
 
   addResultScoreText(container, x, y, finalScore) {
@@ -2951,6 +3044,7 @@ class PegFanScene extends Phaser.Scene {
   grantRewardedBalls() {
     this.adOverlay?.destroy(true);
     this.rewardedContinuesUsed += 1;
+    if (this.currentRun) this.currentRun.continuesUsed = this.rewardedContinuesUsed;
     this.shotsLeft += 3;
     this.score += 100;
     this.playSfx('reward', { volume: 0.76 });
