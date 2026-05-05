@@ -7,6 +7,7 @@ const TOTAL_LEVELS = 100;
 const REWARD_COUNT = 100;
 const SAVE_KEY = 'peg-fan-save-v1';
 const EDITOR_SAVE_KEY = 'peg-fan-editor-v1';
+const EDITOR_STAGE_SLOTS_KEY = 'peg-fan-editor-stage-slots-v1';
 const CANNON_X = WIDTH / 2;
 const CANNON_Y = 168;
 const LAUNCH_SPEED = 660;
@@ -54,6 +55,7 @@ const EDITOR_CONCEPTS = [
   { key: 'final exam', label: 'FINAL EXAM', description: '複数ギミックを組み合わせた最終試験。' },
 ];
 const EDITOR_GRID = 32;
+const EDITOR_SLOT_COUNT = 6;
 const MANUAL_BRICK_THICKNESS = 18;
 const MANUAL_RAIL_THICKNESS = 13;
 
@@ -99,6 +101,7 @@ function loadEditorState() {
     mode: 'concept',
     conceptIndex: 0,
     conceptAct: 0,
+    slotIndex: 0,
     manualTool: 'peg',
     gridSnap: false,
     manualObjects: [],
@@ -112,6 +115,20 @@ function loadEditorState() {
 
 function saveEditorState(state) {
   localStorage.setItem(EDITOR_SAVE_KEY, JSON.stringify(state));
+}
+
+function loadEditorSlots() {
+  const fallback = Array.from({ length: EDITOR_SLOT_COUNT }, () => null);
+  try {
+    const parsed = JSON.parse(localStorage.getItem(EDITOR_STAGE_SLOTS_KEY) || '[]');
+    return fallback.map((slot, index) => parsed[index] ?? slot);
+  } catch {
+    return fallback;
+  }
+}
+
+function saveEditorSlots(slots) {
+  localStorage.setItem(EDITOR_STAGE_SLOTS_KEY, JSON.stringify(slots.slice(0, EDITOR_SLOT_COUNT)));
 }
 
 function clampEditorState(state) {
@@ -128,6 +145,7 @@ function clampEditorState(state) {
     mode: EDITOR_MODES.includes(state.mode) ? state.mode : 'procedural',
     conceptIndex: Phaser.Math.Clamp(Math.round(state.conceptIndex ?? 0), 0, EDITOR_CONCEPTS.length - 1),
     conceptAct: Phaser.Math.Clamp(Math.round(state.conceptAct ?? 0), 0, 9),
+    slotIndex: Phaser.Math.Clamp(Math.round(state.slotIndex ?? 0), 0, EDITOR_SLOT_COUNT - 1),
     manualTool: EDITOR_MANUAL_TOOLS.includes(state.manualTool) ? state.manualTool : 'peg',
     gridSnap: Boolean(state.gridSnap),
     manualObjects: Array.isArray(state.manualObjects) ? state.manualObjects.slice(0, 240) : [],
@@ -858,8 +876,11 @@ class PegFanScene extends Phaser.Scene {
     this.button(662, 1102, 62, 42, '-1', () => adjust('balls', -1), { size: 16 });
     this.button(738, 1102, 62, 42, '+1', () => adjust('balls', 1), { size: 16 });
 
-    this.button(232, 1170, 270, 48, 'SAVE TEMPLATE', () => this.saveEditorTemplate(), { size: 17, fill: 0x4a3d21, stroke: COLORS.gold });
-    this.button(550, 1170, 270, 48, 'LOAD TEMPLATE', () => this.loadEditorTemplate(), { size: 17, fill: 0x334155, stroke: 0x93c5fd });
+    this.button(122, 1170, 110, 48, `SLOT ${state.slotIndex + 1}`, () => this.cycleEditorSlot(1), { size: 15, fill: 0x263449, stroke: 0x93c5fd });
+    this.button(258, 1170, 130, 48, 'SAVE', () => this.saveEditorSlot(), { size: 16, fill: 0x4a3d21, stroke: COLORS.gold });
+    this.button(398, 1170, 130, 48, 'LOAD', () => this.loadEditorSlot(), { size: 16, fill: 0x334155, stroke: 0x93c5fd });
+    this.button(558, 1170, 140, 48, 'EXPORT', () => this.exportEditorJson(), { size: 15, fill: 0x1f3a5f, stroke: COLORS.cyan });
+    this.button(718, 1170, 140, 48, 'IMPORT', () => this.importEditorJson(), { size: 15, fill: 0x3f2f56, stroke: 0xc084fc });
   }
 
   updateEditorState(nextState) {
@@ -912,14 +933,7 @@ class PegFanScene extends Phaser.Scene {
 
   bakeConceptToManual() {
     const level = this.buildConceptLevel();
-    const manualObjects = [
-      ...level.pegs.map((peg) => ({ kind: 'peg', x: peg.x, y: peg.y, type: peg.type ?? 'blue', motion: peg.motion ?? null })),
-      ...level.bricks.map((brick) => ({ kind: 'brick', vertices: normalizeQuad(brick), type: brick.type ?? 'blue' })),
-      ...level.rails.map((rail) => ({ kind: 'rail', vertices: normalizeQuad(rail) })),
-      ...level.bumpers.map((bumper) => ({ kind: 'bumper', x: bumper.x, y: bumper.y, r: bumper.r ?? 28 })),
-      ...level.timedBlocks.map((block) => ({ kind: 'timed', x: block.x, y: block.y, w: block.w, h: block.h, phase: block.phase ?? 0, period: block.period ?? 2600 })),
-      ...level.spinners.map((spinner) => ({ kind: 'spinner', x: spinner.x, y: spinner.y, radius: spinner.radius ?? 56, speed: spinner.speed ?? 0.9, phase: spinner.phase ?? 0 })),
-    ];
+    const manualObjects = this.levelToManualObjects(level);
     this.editorState = clampEditorState({
       ...this.editorState,
       mode: 'manual',
@@ -931,6 +945,106 @@ class PegFanScene extends Phaser.Scene {
     saveEditorState(this.editorState);
     this.showStageEditor();
     this.editorToast('CONCEPT BAKED');
+  }
+
+  levelToManualObjects(level) {
+    return [
+      ...(level.pegs ?? []).map((peg) => ({ kind: 'peg', x: peg.x, y: peg.y, type: peg.type ?? 'blue', motion: peg.motion ?? null })),
+      ...(level.bricks ?? []).map((brick) => ({ kind: 'brick', vertices: normalizeQuad(brick), type: brick.type ?? 'blue' })),
+      ...(level.rails ?? []).map((rail) => ({ kind: 'rail', vertices: normalizeQuad(rail) })),
+      ...(level.bumpers ?? []).map((bumper) => ({ kind: 'bumper', x: bumper.x, y: bumper.y, r: bumper.r ?? 28 })),
+      ...(level.timedBlocks ?? []).map((block) => ({ kind: 'timed', x: block.x, y: block.y, w: block.w, h: block.h, phase: block.phase ?? 0, period: block.period ?? 2600 })),
+      ...(level.spinners ?? []).map((spinner) => ({ kind: 'spinner', x: spinner.x, y: spinner.y, radius: spinner.radius ?? 56, speed: spinner.speed ?? 0.9, phase: spinner.phase ?? 0 })),
+    ];
+  }
+
+  serializeEditorProject() {
+    const state = this.cloneEditorState();
+    const level = this.buildEditorLevel();
+    return {
+      format: 'peg-fan-stage',
+      version: 1,
+      savedAt: new Date().toISOString(),
+      name: `Slot ${state.slotIndex + 1}`,
+      state,
+      level,
+    };
+  }
+
+  applyEditorProject(project) {
+    if (!project || typeof project !== 'object') throw new Error('Invalid stage JSON');
+    const state = project.state
+      ? clampEditorState(project.state)
+      : project.level
+        ? clampEditorState({ ...loadEditorState(), mode: 'manual', manualObjects: this.levelToManualObjects(project.level), balls: project.level.balls ?? 10 })
+        : null;
+    if (!state) throw new Error('Stage JSON has no state or level');
+    this.editorState = state;
+    this.editorHistory = [];
+    this.editorRedo = [];
+    saveEditorState(this.editorState);
+    this.showStageEditor();
+  }
+
+  cycleEditorSlot(dir = 1) {
+    this.editorState.slotIndex = (this.editorState.slotIndex + dir + EDITOR_SLOT_COUNT) % EDITOR_SLOT_COUNT;
+    saveEditorState(this.editorState);
+    this.showStageEditor();
+  }
+
+  saveEditorSlot() {
+    const slots = loadEditorSlots();
+    const project = this.serializeEditorProject();
+    project.name = `Slot ${this.editorState.slotIndex + 1} ${project.level.concept ? project.level.concept : this.editorState.mode}`;
+    slots[this.editorState.slotIndex] = project;
+    saveEditorSlots(slots);
+    this.editorToast(`SAVED SLOT ${this.editorState.slotIndex + 1}`);
+  }
+
+  loadEditorSlot() {
+    const slot = loadEditorSlots()[this.editorState.slotIndex];
+    if (!slot) {
+      this.editorToast(`EMPTY SLOT ${this.editorState.slotIndex + 1}`);
+      return;
+    }
+    this.applyEditorProject(slot);
+    this.editorToast(`LOADED SLOT ${this.editorState.slotIndex + 1}`);
+  }
+
+  exportEditorJson() {
+    const project = this.serializeEditorProject();
+    const text = JSON.stringify(project, null, 2);
+    const blob = new Blob([text], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `peg-fan-stage-${Date.now()}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    this.editorToast('JSON EXPORTED');
+  }
+
+  importEditorJson() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/json,.json';
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          this.applyEditorProject(JSON.parse(String(reader.result ?? '{}')));
+          this.editorToast('JSON IMPORTED');
+        } catch (error) {
+          this.editorToast('IMPORT FAILED');
+        }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
   }
 
   saveEditorTemplate() {
@@ -962,6 +1076,10 @@ class PegFanScene extends Phaser.Scene {
 
   cloneManualObjects(objects = this.editorState?.manualObjects ?? []) {
     return clonePlain(objects);
+  }
+
+  cloneEditorState(state = this.editorState) {
+    return clonePlain(clampEditorState(state));
   }
 
   manualObjectsEqual(a, b) {
