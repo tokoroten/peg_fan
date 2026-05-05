@@ -400,22 +400,53 @@ function generateLevel(level) {
       };
     });
   };
+  const addTutorialBank = (a) => {
+    const spread = 190 + a * 8;
+    const centerY = 560 + a * 10;
+    addArc(450, centerY, spread, 92 + a * 4, Math.PI * 0.13, Math.PI * 0.87, 13 + a, (i) => (i === 2 || i === 7 || i === 11 ? 'orange' : 'blue'));
+    addLine({ x: 190, y: 735 + a * 8 }, { x: 710, y: 735 + a * 8 }, 7 + Math.floor(a / 3), (i) => (i === 1 || i === 5 ? 'orange' : 'blue'), 8 + a);
+    addRail(450, 835, 230 + a * 14, 13, 0);
+  };
+  const addTutorialPocket = (a) => {
+    addArc(312, 555, 128 + a * 4, 138, Math.PI * 0.5, Math.PI * 1.55, 12 + a, (i) => (i % 5 === 1 ? 'orange' : 'blue'));
+    addArc(588, 555, 128 + a * 4, 138, Math.PI * 1.45, Math.PI * 2.5, 12 + a, (i) => (i % 5 === 2 ? 'orange' : 'blue'));
+    addLine({ x: 305, y: 815 }, { x: 595, y: 815 }, 7 + Math.floor(a / 2), (i) => (i === 3 ? 'orange' : 'blue'), 12);
+    if (a >= 3) bumpers.push({ x: 450, y: 665, r: 26 + a * 0.8 });
+    addRail(280, 880, 170 + a * 8, 13, -0.22);
+    addRail(620, 880, 170 + a * 8, 13, 0.22);
+  };
+  const addLaneLesson = (a) => {
+    const count = 12 + a;
+    addLine({ x: 140, y: 355 }, { x: 382, y: 900 }, count, (i) => (i % 5 === 1 ? 'orange' : 'blue'), 10 + a);
+    addLine({ x: 760, y: 355 }, { x: 518, y: 900 }, count, (i) => (i % 5 === 3 ? 'orange' : 'blue'), -10 - a);
+    addRail(288, 658, 186 + a * 5, 13, -0.56);
+    addRail(612, 658, 186 + a * 5, 13, 0.56);
+    if (a >= 4) addSegmentBrick({ x: 365, y: 805 }, { x: 535, y: 805 }, a >= 8 ? 'orange' : 'blue', 18, 3);
+  };
+  const addGateLesson = (a) => {
+    const rows = 4 + Math.floor(a / 2);
+    for (let row = 0; row < rows; row += 1) {
+      const y = 360 + row * 86;
+      const gap = 3 + ((row + a) % 3);
+      for (let col = 0; col < 8; col += 1) {
+        if (col === gap || col === gap + 1) continue;
+        addPeg(124 + col * 92 + (row % 2 ? 36 : 0), y, (row + col + a) % 4 === 0 ? 'orange' : 'blue');
+      }
+    }
+    addLine({ x: 240, y: 840 }, { x: 660, y: 840 }, 8 + Math.floor(a / 2), (i) => (i % 4 === 2 ? 'orange' : 'blue'), 14);
+    addRail(450, 915, 310, 13, 0);
+    if (a >= 6) timedBlocks.push({ x: 450, y: 680, w: 180, h: 22, phase: Math.PI / 2, period: 3000 });
+  };
 
   switch (chapter) {
     case 0: {
-      addArc(450, 620, 220 + act * 5, 150, Math.PI * 0.08, Math.PI * 0.92, 18 + act * 2, targetEvery(4, act % 4));
-      addArc(450, 620, 220 + act * 5, 150, Math.PI * 1.08, Math.PI * 1.92, 16 + act, targetEvery(5, 2));
-      addLine({ x: 230, y: 840 }, { x: 670, y: 840 }, 8 + Math.floor(act / 2), targetEvery(3, 1), 16);
-      addRail(450, 890, 240 + act * 10, 13, 0);
-      if (act > 4) bumpers.push({ x: 450, y: 690, r: 28 + act });
+      if (act <= 4) addTutorialBank(act);
+      else addTutorialPocket(act - 5);
       break;
     }
     case 1: {
-      addLine({ x: 130, y: 360 }, { x: 400, y: 950 }, 16 + act, targetEvery(4, 1), 18);
-      addLine({ x: 770, y: 360 }, { x: 500, y: 950 }, 16 + act, targetEvery(4, 2), -18);
-      addRail(280, 650, 210, 13, -0.64);
-      addRail(620, 650, 210, 13, 0.64);
-      addSegmentBrick({ x: 370, y: 810 }, { x: 530, y: 810 }, act > 6 ? 'orange' : 'blue', 18);
+      if (act <= 4) addLaneLesson(act);
+      else addGateLesson(act - 5);
       break;
     }
     case 2: {
@@ -984,9 +1015,7 @@ class PegFanScene extends Phaser.Scene {
     this.button(414, 1230, 122, 42, 'LOAD LV', () => this.loadEditorStageNumber(), { size: 13, fill: 0x334155, stroke: 0x93c5fd });
     this.button(548, 1230, 122, 42, 'SAVE LV', () => this.saveEditorStageNumber(), { size: 13, fill: 0x4a3d21, stroke: COLORS.gold });
     this.button(682, 1230, 96, 42, 'AUDIT', () => this.showStageAudit(), { size: 13, fill: 0x1f3a5f, stroke: COLORS.cyan });
-    if (state.mode === 'manual') {
-      this.button(788, 1230, 76, 42, 'EDIT', () => this.cycleManualSelection(1), { size: 13, fill: state.selectedManualIndex >= 0 ? 0x6b4b18 : 0x263449, stroke: state.selectedManualIndex >= 0 ? COLORS.gold : 0x52617b });
-    }
+    this.button(790, 1230, 92, 42, 'BUNDLE', () => this.exportAllPlayableStages(), { size: 12, fill: 0x3f2f56, stroke: 0xc084fc });
   }
 
   updateEditorState(nextState) {
@@ -1074,6 +1103,29 @@ class PegFanScene extends Phaser.Scene {
       name: `Slot ${state.slotIndex + 1}`,
       state,
       level,
+    };
+  }
+
+  serializePlayableStageFile(levelNumber) {
+    const level = this.getPlayableLevel(levelNumber);
+    return normalizeLevelForPlay({ ...level, editorTest: false }, levelNumber);
+  }
+
+  serializeAllPlayableStagesBundle() {
+    const files = {};
+    const overrides = [];
+    for (let level = 1; level <= TOTAL_LEVELS; level += 1) {
+      const fileName = `stage-${String(level).padStart(3, '0')}.json`;
+      files[`public/assets/stages/${fileName}`] = this.serializePlayableStageFile(level);
+      if (localStorage.getItem(stageOverrideKey(level))) overrides.push(level);
+    }
+    return {
+      format: 'peg-fan-stage-bundle',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      stageCount: TOTAL_LEVELS,
+      overrideLevels: overrides,
+      files,
     };
   }
 
@@ -1172,6 +1224,21 @@ class PegFanScene extends Phaser.Scene {
     this.editorToast(`SAVED LEVEL ${levelNumber}`);
   }
 
+  exportAllPlayableStages() {
+    const bundle = this.serializeAllPlayableStagesBundle();
+    const text = JSON.stringify(bundle, null, 2);
+    const blob = new Blob([text], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `peg-fan-production-stages-${Date.now()}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    this.editorToast(`EXPORTED ${bundle.stageCount} STAGES`);
+  }
+
   collectStageAudits() {
     return Array.from({ length: TOTAL_LEVELS }, (_, index) => {
       const levelNumber = index + 1;
@@ -1235,8 +1302,26 @@ class PegFanScene extends Phaser.Scene {
       const reader = new FileReader();
       reader.onload = () => {
         try {
-          this.applyEditorProject(JSON.parse(String(reader.result ?? '{}')));
-          this.editorToast('JSON IMPORTED');
+          const parsed = JSON.parse(String(reader.result ?? '{}'));
+          if (parsed.format === 'peg-fan-stage-bundle' && parsed.files) {
+            Object.entries(parsed.files).forEach(([filePath, level]) => {
+              const match = String(filePath).match(/stage-(\d{3})\.json$/);
+              const levelNumber = match ? Number(match[1]) : Number(level?.level);
+              if (levelNumber >= 1 && levelNumber <= TOTAL_LEVELS) {
+                localStorage.setItem(stageOverrideKey(levelNumber), JSON.stringify({
+                  format: 'peg-fan-stage',
+                  version: 1,
+                  importedAt: new Date().toISOString(),
+                  name: `Imported Stage ${String(levelNumber).padStart(3, '0')}`,
+                  level: normalizeLevelForPlay(level, levelNumber),
+                }));
+              }
+            });
+            this.editorToast('BUNDLE IMPORTED');
+          } else {
+            this.applyEditorProject(parsed);
+            this.editorToast('JSON IMPORTED');
+          }
         } catch (error) {
           this.editorToast('IMPORT FAILED');
         }
@@ -1892,9 +1977,9 @@ class PegFanScene extends Phaser.Scene {
       }
       this.renderSelectedPropertyPanel(selected);
     }
-    this.add.text(78, 824, `OBJECTS ${level.pegs.length + level.bricks.length + level.rails.length + level.bumpers.length + level.timedBlocks.length + level.spinners.length}   ORANGE ${level.targetCount}`, {
+    this.add.text(78, 282, `OBJECTS ${level.pegs.length + level.bricks.length + level.rails.length + level.bumpers.length + level.timedBlocks.length + level.spinners.length}   ORANGE ${level.targetCount}`, {
       fontFamily: 'Verdana',
-      fontSize: 20,
+      fontSize: 18,
       fontStyle: '700',
       color: COLORS.text,
     }).setDepth(4);
