@@ -2776,13 +2776,55 @@ class PegFanScene extends Phaser.Scene {
     this.time.delayedCall(450, () => this.showResult(false));
   }
 
+  addResultScoreText(container, x, y, finalScore) {
+    const text = this.add.text(x, y, 'SCORE 0', {
+      fontFamily: 'Verdana',
+      fontSize: 30,
+      color: COLORS.text,
+    }).setOrigin(0.5);
+    container.add(text);
+    const counter = { value: 0 };
+    this.tweens.add({
+      targets: counter,
+      value: finalScore,
+      duration: 760,
+      ease: 'Cubic.easeOut',
+      onUpdate: () => text.setText(`SCORE ${Math.round(counter.value)}   TARGET ${this.targetsLeft}`),
+      onComplete: () => text.setText(`SCORE ${finalScore}   TARGET ${this.targetsLeft}`),
+    });
+    return text;
+  }
+
+  addRewardTeaser(container, x, y, level, label = 'NEXT REWARD') {
+    const rewardNumber = Phaser.Math.Clamp(level, 1, REWARD_COUNT);
+    container.add(this.add.rectangle(x, y, 278, 150, 0x08111f, 0.82).setStrokeStyle(2, COLORS.gold, 0.45));
+    container.add(this.add.image(x - 94, y, `reward-${rewardNumber}`).setDisplaySize(82, 118).setAlpha(0.26));
+    container.add(this.add.text(x - 34, y - 40, label, {
+      fontFamily: 'Verdana',
+      fontSize: 16,
+      fontStyle: '700',
+      color: '#ffd35a',
+    }).setOrigin(0, 0.5));
+    container.add(this.add.text(x - 34, y - 10, `LEVEL ${rewardNumber}`, {
+      fontFamily: 'Verdana',
+      fontSize: 24,
+      fontStyle: '700',
+      color: COLORS.text,
+    }).setOrigin(0, 0.5));
+    container.add(this.add.text(x - 34, y + 26, 'CLEAR TO UNLOCK', {
+      fontFamily: 'Verdana',
+      fontSize: 13,
+      color: COLORS.muted,
+    }).setOrigin(0, 0.5));
+  }
+
   showResult(success) {
     this.view = 'result';
     this.resultOverlay?.destroy(true);
     const level = this.level.level;
     const isEditorTest = Boolean(this.level.editorTest);
     const canContinue = !success && this.rewardedContinuesUsed < 1 && !isEditorTest;
-    const panelHeight = isEditorTest ? 460 : success ? 1060 : canContinue ? 600 : 430;
+    const panelHeight = isEditorTest ? 460 : success ? 1060 : canContinue ? 820 : 640;
     const titleY = success ? 176 : HEIGHT / 2 - 180;
     const scoreY = success ? 238 : HEIGHT / 2 - 106;
     this.resultOverlay = this.add.container(0, 0).setDepth(50);
@@ -2793,11 +2835,7 @@ class PegFanScene extends Phaser.Scene {
       fontStyle: '700',
       color: success ? '#ffd35a' : '#ff8ba6',
     }).setOrigin(0.5));
-    this.resultOverlay.add(this.add.text(WIDTH / 2, scoreY, `SCORE ${this.score}   TARGET ${this.targetsLeft}`, {
-      fontFamily: 'Verdana',
-      fontSize: 30,
-      color: COLORS.text,
-    }).setOrigin(0.5));
+    this.addResultScoreText(this.resultOverlay, WIDTH / 2, scoreY, this.score);
 
     if (success && !isEditorTest) {
       const rewardNumber = Phaser.Math.Clamp(level, 1, REWARD_COUNT);
@@ -2844,6 +2882,9 @@ class PegFanScene extends Phaser.Scene {
         fontSize: 16,
         color: '#7f8aa0',
       }).setOrigin(0.5));
+      this.addRewardTeaser(this.resultOverlay, WIDTH / 2, HEIGHT / 2 + 176, level, 'CURRENT REWARD');
+    } else if (!success && !isEditorTest) {
+      this.addRewardTeaser(this.resultOverlay, WIDTH / 2, HEIGHT / 2 + 66, level, 'LOCKED REWARD');
     }
 
     if (isEditorTest) {
@@ -2852,7 +2893,7 @@ class PegFanScene extends Phaser.Scene {
       this.resultOverlay.add([...Object.values(retry), ...Object.values(edit)]);
     } else {
       const next = Math.min(TOTAL_LEVELS, level + 1);
-      const y = success ? 1032 : canContinue ? HEIGHT / 2 + 178 : HEIGHT / 2 + 48;
+      const y = success ? 1032 : canContinue ? HEIGHT / 2 + 300 : HEIGHT / 2 + 226;
       const retry = this.button(WIDTH / 2 - 185, y, 260, 64, success && level < TOTAL_LEVELS ? '次へ' : '再挑戦', () => this.startLevel(success && level < TOTAL_LEVELS ? next : level), { fill: 0x2c6f84 });
       const select = this.button(WIDTH / 2 + 185, y, 260, 64, '選択へ', () => this.showLevelSelect());
       const gallery = this.button(WIDTH / 2, y + 90, 300, 58, 'ギャラリー', () => this.showGallery(), { fill: 0x4a3d21, stroke: COLORS.gold });
