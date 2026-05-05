@@ -178,6 +178,17 @@ function centerOfPoints(points) {
   return points.reduce((sum, point) => ({ x: sum.x + point.x / points.length, y: sum.y + point.y / points.length }), { x: 0, y: 0 });
 }
 
+function rotatePointAround(point, center, angle) {
+  const dx = point.x - center.x;
+  const dy = point.y - center.y;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return {
+    x: center.x + dx * cos - dy * sin,
+    y: center.y + dx * sin + dy * cos,
+  };
+}
+
 function stageOverrideKey(level) {
   return `${STAGE_OVERRIDE_KEY_PREFIX}${String(level).padStart(3, '0')}`;
 }
@@ -555,6 +566,16 @@ class PegFanScene extends Phaser.Scene {
     }
   }
 
+  playHitNote(key, combo, config = {}) {
+    const scale = [0, 180, 360, 500, 700, 860, 1040, 1200];
+    const detune = scale[Math.min(scale.length - 1, Math.max(0, combo - 1))];
+    this.playSfx(key, {
+      detune,
+      rate: Phaser.Math.Clamp(0.96 + combo * 0.025, 0.96, 1.28),
+      ...config,
+    });
+  }
+
   clearScene() {
     this.time.removeAllEvents();
     this.tweens.killAll();
@@ -683,6 +704,12 @@ class PegFanScene extends Phaser.Scene {
       align: 'center',
       shadow: { offsetX: 0, offsetY: 2, color: '#000000', blur: 4, fill: true },
     }).setOrigin(0.5);
+    if (opts.depth !== undefined) {
+      shadow.setDepth(opts.depth);
+      rect.setDepth(opts.depth + 0.1);
+      shine.setDepth(opts.depth + 0.2);
+      text.setDepth(opts.depth + 0.3);
+    }
     if (!opts.disabled) {
       const setHover = (isHover) => {
         rect.setFillStyle(isHover ? (opts.hover ?? 0x31425f) : fill);
@@ -1397,6 +1424,63 @@ class PegFanScene extends Phaser.Scene {
     });
   }
 
+  moveSelectedManualObject(dx, dy) {
+    this.updateSelectedManualObject((object) => {
+      if (Array.isArray(object.vertices)) {
+        return { ...object, vertices: normalizeQuad(object).map((point) => ({ x: point.x + dx, y: point.y + dy })) };
+      }
+      return { ...object, x: object.x + dx, y: object.y + dy };
+    });
+  }
+
+  rotateSelectedManualObject(dir = 1) {
+    this.updateSelectedManualObject((object) => {
+      if (!Array.isArray(object.vertices)) return object;
+      const center = this.objectCenter(object);
+      return {
+        ...object,
+        vertices: normalizeQuad(object).map((point) => rotatePointAround(point, center, dir * 0.12)),
+      };
+    });
+  }
+
+  selectedManualSummary(object) {
+    if (!object) return ['NO SELECTION', 'Click an object or use SEL+'];
+    const center = this.objectCenter(object);
+    const base = [`${object.kind.toUpperCase()}  X ${Math.round(center.x)}  Y ${Math.round(center.y)}`];
+    if (object.kind === 'peg' || object.kind === 'brick') base.push(`TYPE ${(object.type ?? 'blue').toUpperCase()}`);
+    if (object.kind === 'bumper') base.push(`RADIUS ${Math.round(object.r ?? 28)}`);
+    if (object.kind === 'timed') base.push(`WIDTH ${Math.round(object.w ?? 140)}  PERIOD ${Math.round(object.period ?? 2600)}`);
+    if (object.kind === 'spinner') base.push(`RADIUS ${Math.round(object.radius ?? 48)}  SPEED ${(object.speed ?? 0.9).toFixed(1)}`);
+    if (object.kind === 'brick' || object.kind === 'rail') base.push('ROTATE and SIZE edit all vertices');
+    return base;
+  }
+
+  renderSelectedPropertyPanel(selected) {
+    this.add.rectangle(692, 384, 250, 246, 0x07101d, 0.92).setStrokeStyle(2, COLORS.gold, selected ? 0.82 : 0x2d3d58).setDepth(8);
+    this.add.text(584, 278, 'PROPERTY', {
+      fontFamily: 'Verdana',
+      fontSize: 15,
+      fontStyle: '700',
+      color: '#ffd35a',
+    }).setDepth(9);
+    this.add.text(584, 306, this.selectedManualSummary(selected).join('\n'), {
+      fontFamily: 'Consolas, Verdana',
+      fontSize: 13,
+      lineSpacing: 5,
+      color: selected ? COLORS.text : COLORS.muted,
+    }).setDepth(9);
+    this.button(608, 406, 54, 34, 'X-', () => this.moveSelectedManualObject(-8, 0), { size: 12, fill: 0x263449, depth: 10 });
+    this.button(672, 406, 54, 34, 'X+', () => this.moveSelectedManualObject(8, 0), { size: 12, fill: 0x263449, depth: 10 });
+    this.button(736, 406, 54, 34, 'Y-', () => this.moveSelectedManualObject(0, -8), { size: 12, fill: 0x263449, depth: 10 });
+    this.button(800, 406, 54, 34, 'Y+', () => this.moveSelectedManualObject(0, 8), { size: 12, fill: 0x263449, depth: 10 });
+    this.button(632, 450, 76, 34, 'ROT-', () => this.rotateSelectedManualObject(-1), { size: 11, fill: 0x1f3a5f, depth: 10 });
+    this.button(720, 450, 76, 34, 'ROT+', () => this.rotateSelectedManualObject(1), { size: 11, fill: 0x1f3a5f, depth: 10 });
+    this.button(808, 450, 76, 34, 'TYPE', () => this.cycleSelectedManualType(), { size: 11, fill: 0x1f3a5f, stroke: COLORS.blue, depth: 10 });
+    this.button(650, 494, 96, 34, 'SIZE-', () => this.adjustSelectedManualProperty(-1), { size: 11, fill: 0x4a3d21, stroke: COLORS.gold, depth: 10 });
+    this.button(762, 494, 96, 34, 'SIZE+', () => this.adjustSelectedManualProperty(1), { size: 11, fill: 0x4a3d21, stroke: COLORS.gold, depth: 10 });
+  }
+
   deleteSelectedManualObject() {
     const index = this.editorState.selectedManualIndex ?? -1;
     if (index < 0 || index >= (this.editorState.manualObjects?.length ?? 0)) {
@@ -1806,6 +1890,7 @@ class PegFanScene extends Phaser.Scene {
         marker.lineStyle(2, COLORS.cyan, 0.8);
         marker.strokeCircle(center.x, center.y, 5);
       }
+      this.renderSelectedPropertyPanel(selected);
     }
     this.add.text(78, 824, `OBJECTS ${level.pegs.length + level.bricks.length + level.rails.length + level.bumpers.length + level.timedBlocks.length + level.spinners.length}   ORANGE ${level.targetCount}`, {
       fontFamily: 'Verdana',
@@ -1848,6 +1933,9 @@ class PegFanScene extends Phaser.Scene {
     this.levelCleared = false;
     this.orangeClearPending = false;
     this.orangeClearAnnounced = false;
+    this.lastOrangeAnnounced = false;
+    this.clearBonusAwarded = false;
+    this.orangeClearCombo = 0;
     this.shotCombo = 0;
     this.currentAim = { x: 0, y: 1 };
 
@@ -2342,12 +2430,48 @@ class PegFanScene extends Phaser.Scene {
     });
   }
 
+  showLastOrangeBanner(targets) {
+    if (this.lastOrangeAnnounced || this.targetsLeft !== 1 || this.orangeClearPending) return;
+    this.lastOrangeAnnounced = true;
+    this.playSfx('combo', { volume: 0.78, detune: 900 });
+    const banner = this.add.container(WIDTH / 2, 246).setDepth(37);
+    banner.add(this.add.rectangle(0, 0, 430, 72, 0x170f07, 0.9).setStrokeStyle(3, COLORS.orange, 0.96));
+    banner.add(this.add.text(0, -2, 'LAST ORANGE', {
+      fontFamily: 'Verdana',
+      fontSize: 34,
+      fontStyle: '700',
+      color: '#ffb088',
+      stroke: '#080b12',
+      strokeThickness: 6,
+    }).setOrigin(0.5));
+    this.tweens.add({
+      targets: banner,
+      scale: { from: 0.86, to: 1.06 },
+      alpha: { from: 1, to: 0 },
+      duration: 1000,
+      ease: 'Cubic.easeOut',
+      onComplete: () => banner.destroy(true),
+    });
+    targets.forEach((target) => {
+      const ring = this.add.circle(target.x, target.y, 32, COLORS.orange, 0).setStrokeStyle(4, COLORS.gold, 0.9).setDepth(9);
+      this.tweens.add({
+        targets: ring,
+        scale: 1.8,
+        alpha: 0,
+        duration: 900,
+        ease: 'Cubic.easeOut',
+        onComplete: () => ring.destroy(),
+      });
+    });
+  }
+
   pulseRemainingOrange() {
     if (this.targetsLeft > 3 || this.orangeClearPending) return;
     const targets = [
       ...this.pegGroup.getChildren().filter((peg) => peg.active && peg.pegType === 'orange' && !peg.hit),
       ...this.brickGroup.getChildren().filter((brick) => brick.active && brick.pegType === 'orange' && !brick.hit),
     ];
+    this.showLastOrangeBanner(targets);
     targets.forEach((target) => {
       this.tweens.add({
         targets: target,
@@ -2389,9 +2513,8 @@ class PegFanScene extends Phaser.Scene {
     if (peg.pegType === 'orange') this.targetsLeft -= 1;
     if (peg.pegType === 'green' && !this.orangeClearPending) this.multiballQueued = true;
     const hitSound = this.shotCombo >= 6 ? 'combo' : peg.pegType === 'orange' ? 'orange' : peg.pegType === 'green' ? 'green' : 'peg';
-    this.playSfx(hitSound, {
+    this.playHitNote(hitSound, this.shotCombo, {
       volume: peg.pegType === 'orange' ? 0.74 : 0.58,
-      rate: Phaser.Math.Clamp(0.92 + this.shotCombo * 0.045, 0.92, 1.45),
     });
     this.showComboBanner(this.shotCombo);
     this.burst(peg.x, peg.y, peg.fillColor ?? COLORS.gold);
@@ -2467,6 +2590,7 @@ class PegFanScene extends Phaser.Scene {
     if (this.orangeClearPending || this.levelCleared) return;
     this.orangeClearPending = true;
     this.orangeClearAnnounced = true;
+    this.orangeClearCombo = this.shotCombo;
     this.playSfx('clear', { volume: 0.86 });
     this.refreshHud();
     const flash = this.add.rectangle(WIDTH / 2, HEIGHT / 2, WIDTH, HEIGHT, COLORS.gold, 0.18).setDepth(34);
@@ -2504,10 +2628,50 @@ class PegFanScene extends Phaser.Scene {
     this.clearLevel();
   }
 
+  awardClearBonus() {
+    if (this.clearBonusAwarded) return 0;
+    this.clearBonusAwarded = true;
+    const ballBonus = Math.max(0, this.shotsLeft) * 1000;
+    const styleBonus = Math.min(5000, Math.max(0, ((this.orangeClearCombo ?? this.shotCombo) - 4) * 250));
+    const total = ballBonus + styleBonus;
+    if (total <= 0) return 0;
+    this.score += total;
+    this.refreshHud();
+    const panel = this.add.container(WIDTH / 2, 378).setDepth(38);
+    panel.add(this.add.rectangle(0, 0, 470, 116, 0x0b111b, 0.9).setStrokeStyle(3, COLORS.gold, 0.9));
+    panel.add(this.add.text(0, -30, 'CLEAR BONUS', {
+      fontFamily: 'Verdana',
+      fontSize: 25,
+      fontStyle: '700',
+      color: '#ffd35a',
+    }).setOrigin(0.5));
+    panel.add(this.add.text(0, 12, `BALL ${ballBonus}   STYLE ${styleBonus}`, {
+      fontFamily: 'Verdana',
+      fontSize: 18,
+      color: '#dbeafe',
+    }).setOrigin(0.5));
+    panel.add(this.add.text(0, 42, `+${total}`, {
+      fontFamily: 'Verdana',
+      fontSize: 30,
+      fontStyle: '700',
+      color: '#ffffff',
+    }).setOrigin(0.5));
+    this.tweens.add({
+      targets: panel,
+      y: 330,
+      alpha: 0,
+      duration: 1150,
+      ease: 'Cubic.easeOut',
+      onComplete: () => panel.destroy(true),
+    });
+    return total;
+  }
+
   clearLevel() {
     if (this.levelCleared) return;
     this.levelCleared = true;
     const level = this.level.level;
+    const clearBonus = this.awardClearBonus();
     if (!this.level.editorTest) {
       if (!this.save.completedLevels.includes(level)) this.save.completedLevels.push(level);
       this.save.unlockedLevel = Math.min(TOTAL_LEVELS, Math.max(this.save.unlockedLevel, level + 1));
@@ -2519,7 +2683,7 @@ class PegFanScene extends Phaser.Scene {
       saveProgress(this.save);
     }
     if (!this.orangeClearAnnounced) this.playSfx('clear', { volume: 0.82 });
-    this.time.delayedCall(550, () => this.showResult(true));
+    this.time.delayedCall(clearBonus > 0 ? 1050 : 550, () => this.showResult(true));
   }
 
   failLevel() {
