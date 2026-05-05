@@ -48,6 +48,8 @@ const MANUAL_RAIL_THICKNESS = 13;
 const COLORS = {
   panel: 0x141b2a,
   panel2: 0x202a3d,
+  ink: 0x08111f,
+  line: 0x31425f,
   text: '#f6f8fc',
   muted: '#aab5c8',
   gold: 0xffd35a,
@@ -456,78 +458,134 @@ class PegFanScene extends Phaser.Scene {
 
   addBackground(title = 'PEG FAN') {
     const g = this.add.graphics();
-    g.fillGradientStyle(0x141b2a, 0x141b2a, 0x0b111b, 0x0b111b, 1);
+    g.fillGradientStyle(0x142033, 0x10243a, 0x07101d, 0x0b1020, 1);
     g.fillRect(0, 0, WIDTH, HEIGHT);
-    g.fillStyle(0xffffff, 0.035);
-    for (let i = 0; i < 22; i += 1) {
-      g.fillCircle((i * 137) % WIDTH, 90 + ((i * 241) % 1080), 16 + (i % 5) * 10);
+    g.lineStyle(1, 0xffffff, 0.035);
+    for (let y = 128; y < HEIGHT; y += 72) g.lineBetween(42, y, WIDTH - 42, y + 28);
+    g.lineStyle(2, COLORS.gold, 0.16);
+    g.lineBetween(46, 112, WIDTH - 46, 112);
+    g.lineStyle(2, COLORS.cyan, 0.11);
+    g.lineBetween(46, HEIGHT - 84, WIDTH - 46, HEIGHT - 84);
+    for (let i = 0; i < 36; i += 1) {
+      const x = 70 + ((i * 211) % 760);
+      const y = 180 + ((i * 157) % 980);
+      g.fillStyle(i % 5 === 0 ? COLORS.gold : 0xffffff, i % 5 === 0 ? 0.18 : 0.07);
+      g.fillRect(x, y, i % 5 === 0 ? 4 : 2, i % 5 === 0 ? 4 : 2);
     }
     this.add.text(48, 42, title, {
-      fontFamily: 'Verdana',
-      fontSize: 50,
+      fontFamily: 'Trebuchet MS, Verdana',
+      fontSize: 48,
       fontStyle: '700',
       color: COLORS.text,
+      shadow: { offsetX: 0, offsetY: 4, color: '#000000', blur: 8, fill: true },
     });
   }
 
+  addPanel(x, y, w, h, opts = {}) {
+    const shadow = this.add.rectangle(x + 6, y + 8, w, h, 0x020611, 0.32);
+    const panel = this.add.rectangle(x, y, w, h, opts.fill ?? 0x0d1727, opts.alpha ?? 0.92)
+      .setStrokeStyle(opts.strokeWidth ?? 2, opts.stroke ?? COLORS.line, opts.strokeAlpha ?? 0.86);
+    const gloss = this.add.rectangle(x, y - h / 2 + 2, w - 10, 2, opts.accent ?? COLORS.gold, opts.accentAlpha ?? 0.18);
+    return { shadow, panel, gloss };
+  }
+
+  addLabel(x, y, label, opts = {}) {
+    return this.add.text(x, y, label, {
+      fontFamily: opts.family ?? 'Meiryo, Trebuchet MS, Verdana',
+      fontSize: opts.size ?? 20,
+      fontStyle: opts.style ?? '700',
+      color: opts.color ?? COLORS.text,
+      align: opts.align ?? 'left',
+      lineSpacing: opts.lineSpacing ?? 4,
+      wordWrap: opts.wordWrap,
+      shadow: opts.shadow === false ? undefined : { offsetX: 0, offsetY: 2, color: '#000000', blur: 4, fill: true },
+    });
+  }
+
+  addStatPill(x, y, w, label, value, color = COLORS.gold) {
+    this.add.rectangle(x, y, w, 54, 0x0b1220, 0.86).setStrokeStyle(2, color, 0.55);
+    this.addLabel(x - w / 2 + 18, y - 14, label, { family: 'Verdana', size: 12, color: '#9fb0cb', shadow: false });
+    this.addLabel(x - w / 2 + 18, y + 2, String(value), { family: 'Verdana', size: 22, color: '#ffffff', shadow: false });
+  }
+
+  addIconGem(x, y, color, radius = 11) {
+    this.add.circle(x, y, radius + 5, 0xffffff, 0.08);
+    this.add.circle(x, y, radius, color, 1).setStrokeStyle(3, 0xffffff, 0.35);
+    this.add.circle(x - radius * 0.25, y - radius * 0.28, radius * 0.34, 0xffffff, 0.28);
+  }
+
+  colorForType(type) {
+    if (type === 'orange') return COLORS.orange;
+    if (type === 'green') return COLORS.green;
+    if (type === 'purple') return COLORS.purple;
+    return COLORS.blue;
+  }
+
+  titleCase(value) {
+    return String(value).replace(/_/g, ' ').toUpperCase();
+  }
+
   button(x, y, w, h, label, onClick, opts = {}) {
-    const fill = opts.disabled ? 0x2b3445 : opts.fill ?? COLORS.panel2;
-    const rect = this.add.rectangle(x, y, w, h, fill, 0.96).setStrokeStyle(2, opts.stroke ?? 0x45526a);
-    const text = this.add.text(x, y, label, {
-      fontFamily: 'Verdana',
-      fontSize: opts.size ?? 25,
+    const fill = opts.disabled ? 0x212b3c : opts.fill ?? COLORS.panel2;
+    const stroke = opts.stroke ?? (opts.primary ? COLORS.gold : 0x52617b);
+    const shadow = this.add.rectangle(x + 4, y + 5, w, h, 0x020611, 0.34);
+    const rect = this.add.rectangle(x, y, w, h, fill, 0.98).setStrokeStyle(2, stroke, opts.disabled ? 0.35 : 0.9);
+    const shine = this.add.rectangle(x, y - h / 2 + 4, w - 12, 3, 0xffffff, opts.disabled ? 0.03 : 0.13);
+    const text = this.add.text(x, y + 1, label, {
+      fontFamily: 'Meiryo, Trebuchet MS, Verdana',
+      fontSize: opts.size ?? 22,
       fontStyle: '700',
       color: opts.disabled ? '#778399' : '#f7f9ff',
       align: 'center',
+      shadow: { offsetX: 0, offsetY: 2, color: '#000000', blur: 4, fill: true },
     }).setOrigin(0.5);
     if (!opts.disabled) {
-      rect.setInteractive({ useHandCursor: true })
-        .on('pointerover', () => rect.setFillStyle(opts.hover ?? 0x2a3750))
-        .on('pointerout', () => rect.setFillStyle(fill))
-        .on('pointerdown', (pointer, localX, localY, event) => {
-          event?.stopPropagation();
-          onClick();
-        });
-      text.setInteractive({ useHandCursor: true }).on('pointerdown', (pointer, localX, localY, event) => {
-        event?.stopPropagation();
-        onClick();
+      const setHover = (isHover) => {
+        rect.setFillStyle(isHover ? (opts.hover ?? 0x31425f) : fill);
+        rect.setScale(isHover ? 1.015 : 1);
+        shine.setAlpha(isHover ? 0.22 : 0.13);
+      };
+      [rect, text, shine].forEach((item) => {
+        item.setInteractive({ useHandCursor: true })
+          .on('pointerover', () => setHover(true))
+          .on('pointerout', () => setHover(false))
+          .on('pointerdown', (pointer, localX, localY, event) => {
+            event?.stopPropagation();
+            this.playSfx('peg', { volume: 0.16, detune: -600 });
+            onClick();
+          });
       });
     }
-    return { rect, text };
+    return { shadow, rect, shine, text };
   }
 
   showMenu() {
     this.view = 'menu';
     this.clearScene();
     this.addBackground('PEG FAN');
-    this.add.text(54, 124, '100 STAGE PEG PUZZLE', {
-      fontFamily: 'Verdana',
-      fontSize: 22,
-      color: '#ffd35a',
-      fontStyle: '700',
-    });
-    this.add.text(54, 178, '狙って撃ち、オレンジペグをすべて消す。\nステージクリアごとにご褒美イラストが1枚解放されます。', {
-      fontFamily: 'Meiryo, Verdana',
-      fontSize: 24,
+    this.addLabel(54, 122, '100 STAGE PEG PUZZLE', { family: 'Verdana', size: 22, color: '#ffd35a' });
+    this.addLabel(54, 168, '狙って撃ち、オレンジペグをすべて消す。\nステージをクリアすると、ご褒美イラストが1枚ずつ解放されます。', {
+      size: 23,
       color: COLORS.muted,
       wordWrap: { width: 720 },
-      lineSpacing: 8,
+      lineSpacing: 7,
+      style: '600',
     });
+    this.addPanel(450, 394, 800, 302, { fill: 0x0b1424, stroke: 0x415472, accent: COLORS.cyan });
+    this.addIconGem(826, 218, COLORS.orange, 16);
+    this.addIconGem(796, 286, COLORS.blue, 14);
+    this.addIconGem(836, 354, COLORS.green, 12);
 
     const startLevel = Math.min(this.save.unlockedLevel, TOTAL_LEVELS);
-    this.button(220, 300, 330, 72, `LEVEL ${startLevel} から`, () => this.startLevel(startLevel), { fill: 0x2c6f84, stroke: 0x5eead4 });
-    this.button(590, 300, 250, 72, 'ステージ選択', () => this.showLevelSelect());
-    this.button(220, 398, 330, 72, 'ギャラリー', () => this.showGallery());
-    this.button(590, 398, 250, 72, '最初から', () => this.startLevel(1), { fill: 0x4b3344 });
-    this.button(450, 496, 620, 68, 'STAGE EDITOR', () => this.showStageEditor(), { fill: 0x334155, stroke: 0x93c5fd, size: 24 });
-    this.button(450, 1085, 360, 46, 'DEBUG: 全解放', () => this.debugUnlockAll(), { fill: 0x2b3445, stroke: 0x64748b, size: 18 });
+    this.button(250, 312, 360, 76, `LEVEL ${startLevel} から再開`, () => this.startLevel(startLevel), { fill: 0x286d72, stroke: 0x5eead4, primary: true, size: 23 });
+    this.button(650, 312, 240, 76, 'ステージ選択', () => this.showLevelSelect(), { size: 21 });
+    this.button(250, 414, 360, 72, 'ギャラリー', () => this.showGallery(), { fill: 0x4a3d21, stroke: COLORS.gold, size: 22 });
+    this.button(650, 414, 240, 72, '最初から', () => this.startLevel(1), { fill: 0x4b3344, stroke: 0x9f6b8b, size: 21 });
+    this.button(450, 516, 640, 68, 'ステージエディタ', () => this.showStageEditor(), { fill: 0x334155, stroke: 0x93c5fd, size: 23 });
+    this.button(450, 1085, 360, 46, 'DEBUG: 全解放', () => this.debugUnlockAll(), { fill: 0x2b3445, stroke: 0x64748b, size: 17 });
 
     this.addProgressPanel();
-    this.add.text(54, 1160, '操作: マウス/タッチで照準、クリックで発射、Spaceでも発射、Escでメニュー', {
-      fontFamily: 'Meiryo, Verdana',
-      fontSize: 20,
-      color: '#95a1b8',
-    });
+    this.addLabel(54, 1160, '操作: マウス/タッチで照準、クリックで発射、Spaceでも発射、Escでメニュー', { size: 18, color: '#95a1b8', style: '600' });
   }
 
   debugUnlockAll() {
@@ -540,23 +598,26 @@ class PegFanScene extends Phaser.Scene {
   }
 
   addProgressPanel() {
-    this.add.rectangle(450, 805, 792, 490, 0x111827, 0.9).setStrokeStyle(2, 0x2f3a4d);
-    this.add.text(86, 594, 'PROGRESS', { fontFamily: 'Verdana', fontSize: 28, fontStyle: '700', color: COLORS.text });
-    this.add.text(86, 650, `解放ステージ: ${this.save.unlockedLevel} / ${TOTAL_LEVELS}`, { fontFamily: 'Meiryo, Verdana', fontSize: 28, color: COLORS.text });
-    this.add.text(86, 698, `閲覧可能イラスト: ${this.save.galleryUnlocked} / ${REWARD_COUNT}`, { fontFamily: 'Meiryo, Verdana', fontSize: 28, color: COLORS.text });
+    this.addPanel(450, 800, 792, 466, { fill: 0x0e1728, stroke: 0x2f3a4d, accent: COLORS.gold });
+    this.addLabel(86, 584, 'PROGRESS', { family: 'Verdana', size: 27 });
+    this.addStatPill(210, 666, 250, 'UNLOCKED', `${this.save.unlockedLevel} / ${TOTAL_LEVELS}`, COLORS.gold);
+    this.addStatPill(500, 666, 250, 'GALLERY', `${this.save.galleryUnlocked} / ${REWARD_COUNT}`, COLORS.cyan);
     const barX = 86;
-    const barY = 770;
-    this.add.rectangle(barX + 335, barY, 670, 28, 0x253044);
-    this.add.rectangle(barX, barY, 670 * ((this.save.unlockedLevel - 1) / TOTAL_LEVELS), 28, COLORS.gold).setOrigin(0, 0.5);
+    const barY = 750;
+    this.add.rectangle(barX + 335, barY, 670, 24, 0x253044).setStrokeStyle(1, 0x42516a, 0.55);
+    this.add.rectangle(barX, barY, Math.max(10, 670 * ((this.save.unlockedLevel - 1) / TOTAL_LEVELS)), 24, COLORS.gold).setOrigin(0, 0.5);
+    this.addLabel(86, 786, 'RECENT REWARDS', { family: 'Verdana', size: 17, color: '#9fb0cb', shadow: false });
     for (let i = 0; i < 5; i += 1) {
       const rewardIndex = Math.min(REWARD_COUNT - 1, Math.max(0, this.save.galleryUnlocked - 5 + i));
       const unlocked = rewardIndex < this.save.galleryUnlocked;
-      this.add.image(162 + i * 145, 935, `reward-${rewardIndex + 1}`).setDisplaySize(104, 150).setAlpha(unlocked ? 1 : 0.25);
-      this.add.text(112 + i * 145, 1030, unlocked ? `L${rewardIndex + 1}` : `L${i + 1}`, {
-        fontFamily: 'Verdana',
-        fontSize: 18,
-        fontStyle: '700',
+      const x = 162 + i * 145;
+      this.add.rectangle(x, 925, 116, 164, 0x08111f, 0.84).setStrokeStyle(2, unlocked ? COLORS.gold : 0x3b4658, unlocked ? 0.68 : 0.35);
+      this.add.image(x, 910, `reward-${rewardIndex + 1}`).setDisplaySize(92, 133).setAlpha(unlocked ? 1 : 0.2);
+      this.addLabel(x - 40, 1008, unlocked ? `L${rewardIndex + 1}` : 'LOCKED', {
+        family: 'Verdana',
+        size: unlocked ? 16 : 12,
         color: unlocked ? '#ffd35a' : '#69758c',
+        shadow: false,
       });
     }
   }
@@ -565,19 +626,21 @@ class PegFanScene extends Phaser.Scene {
     this.view = 'select';
     this.clearScene();
     this.addBackground('STAGE SELECT');
-    this.button(756, 72, 190, 52, '戻る', () => this.showMenu(), { size: 21 });
+    this.button(756, 72, 190, 52, '戻る', () => this.showMenu(), { size: 20 });
+    this.addLabel(54, 124, 'クリア済みはゴールド、未解放はロック表示です。', { size: 19, color: COLORS.muted, style: '600' });
+    this.addPanel(450, 684, 812, 974, { fill: 0x0b1424, stroke: 0x2b3c58, accent: COLORS.cyan, accentAlpha: 0.12 });
     for (let i = 1; i <= TOTAL_LEVELS; i += 1) {
       const col = (i - 1) % 10;
       const row = Math.floor((i - 1) / 10);
       const x = 83 + col * 82;
-      const y = 180 + row * 88;
+      const y = 198 + row * 88;
       const unlocked = i <= this.save.unlockedLevel;
       const completed = this.save.completedLevels.includes(i);
       this.button(x, y, 62, 58, `${i}`, () => this.startLevel(i), {
         disabled: !unlocked,
-        fill: completed ? 0x63511d : 0x213047,
+        fill: completed ? 0x5f4b19 : 0x213047,
         stroke: completed ? COLORS.gold : 0x3f4a5d,
-        size: 20,
+        size: 18,
       });
     }
   }
@@ -586,20 +649,21 @@ class PegFanScene extends Phaser.Scene {
     this.view = 'gallery';
     this.clearScene();
     this.addBackground('GALLERY');
-    this.button(756, 72, 190, 52, '戻る', () => this.showMenu(), { size: 21 });
-    this.add.text(54, 124, '各ステージクリアで1枚解放。画像は public/assets/rewards の同名ファイル差し替えで更新できます。', {
-      fontFamily: 'Meiryo, Verdana',
-      fontSize: 21,
+    this.button(756, 72, 190, 52, '戻る', () => this.showMenu(), { size: 20 });
+    this.addLabel(54, 124, '各ステージクリアで1枚解放。画像は public/assets/rewards の同名ファイル差し替えで更新できます。', {
+      size: 19,
       color: COLORS.muted,
       wordWrap: { width: 790 },
+      style: '600',
     });
+    this.addPanel(450, 715, 812, 990, { fill: 0x0b1424, stroke: 0x2b3c58, accent: COLORS.gold, accentAlpha: 0.12 });
     for (let i = 0; i < REWARD_COUNT; i += 1) {
       const col = i % 10;
       const row = Math.floor(i / 10);
       const x = 82 + col * 82;
       const y = 230 + row * 88;
       const unlocked = i < this.save.galleryUnlocked || this.save.clearedAll;
-      const tile = this.add.rectangle(x, y, 68, 86, 0x111827, 0.94).setStrokeStyle(2, unlocked ? COLORS.gold : 0x3b4658);
+      const tile = this.add.rectangle(x, y, 68, 86, 0x111827, 0.94).setStrokeStyle(2, unlocked ? COLORS.gold : 0x3b4658, unlocked ? 0.8 : 0.45);
       this.add.image(x, y - 7, `reward-${i + 1}`).setDisplaySize(54, 78).setAlpha(unlocked ? 1 : 0.14);
       this.add.text(x, y + 45, `${i + 1}`, {
         fontFamily: 'Verdana',
@@ -637,7 +701,7 @@ class PegFanScene extends Phaser.Scene {
         this.showGallery();
       }
     }, { fill: 0x4a3d21, stroke: COLORS.gold, size: 22 });
-    overlay.add([close.rect, close.text]);
+    overlay.add(Object.values(close));
   }
 
   showStageEditor() {
@@ -645,21 +709,20 @@ class PegFanScene extends Phaser.Scene {
     this.clearScene();
     this.editorState = clampEditorState(this.editorState ?? loadEditorState());
     this.addBackground('STAGE EDITOR');
-    this.button(756, 72, 190, 52, '戻る', () => this.showMenu(), { size: 21 });
+    this.button(756, 72, 190, 52, '戻る', () => this.showMenu(), { size: 20 });
 
-    this.add.text(54, 118, this.editorState.mode === 'manual' ? 'MANUAL LAYOUT BUILDER' : 'PROCEDURAL LAYOUT BUILDER', {
-      fontFamily: 'Verdana',
-      fontSize: 22,
+    this.addLabel(54, 118, this.editorState.mode === 'manual' ? 'MANUAL LAYOUT BUILDER' : 'PROCEDURAL LAYOUT BUILDER', {
+      family: 'Verdana',
+      size: 22,
       color: '#93c5fd',
-      fontStyle: '700',
     });
-    this.add.text(54, 154, this.editorState.mode === 'manual'
-      ? 'グリッドに沿ってクリック配置。ドラッグすると、ブロックやレールを綺麗な線状に並べられます。'
-      : '円 / らせん / ベジェ / 波 / グリッドで自動配置。パーツ種別を変えて即プレイテストできます。', {
-      fontFamily: 'Meiryo, Verdana',
-      fontSize: 18,
+    this.addLabel(54, 154, this.editorState.mode === 'manual'
+      ? '自由配置が基本です。SNAP ON の時だけ、グリッドが入力補助として働きます。ドラッグで連続ブロックやレールを作成できます。'
+      : '円 / らせん / ベジェ / 波 / グリッドで自動配置。brick / rail は連続した4頂点ブロックとして生成されます。', {
+      size: 17,
       color: COLORS.muted,
       wordWrap: { width: 760 },
+      style: '600',
     });
 
     this.addEditorControls();
@@ -678,29 +741,29 @@ class PegFanScene extends Phaser.Scene {
       this.updateEditorState(state);
     };
 
-    this.add.rectangle(450, 1035, 812, 232, 0x101827, 0.94).setStrokeStyle(2, 0x334155);
-    this.add.text(72, 936, state.mode === 'manual' ? `MODE  ${state.mode.toUpperCase()}` : `SHAPE  ${state.shape.toUpperCase()}`, { fontFamily: 'Verdana', fontSize: 20, fontStyle: '700', color: COLORS.text });
-    this.add.text(302, 936, state.mode === 'manual' ? `TOOL  ${state.manualTool.toUpperCase()}` : `PART  ${state.part.toUpperCase()}`, { fontFamily: 'Verdana', fontSize: 20, fontStyle: '700', color: COLORS.text });
-    this.add.text(512, 936, `TYPE  ${state.type.toUpperCase()}`, { fontFamily: 'Verdana', fontSize: 20, fontStyle: '700', color: COLORS.text });
+    this.addPanel(450, 1035, 812, 232, { fill: 0x0f1828, stroke: 0x334155, accent: COLORS.cyan, accentAlpha: 0.16 });
+    this.addStatPill(166, 936, 190, state.mode === 'manual' ? 'MODE' : 'SHAPE', state.mode === 'manual' ? this.titleCase(state.mode) : this.titleCase(state.shape), COLORS.cyan);
+    this.addStatPill(386, 936, 190, state.mode === 'manual' ? 'TOOL' : 'PART', state.mode === 'manual' ? this.titleCase(state.manualTool) : this.titleCase(state.part), COLORS.gold);
+    this.addStatPill(606, 936, 190, 'TYPE', this.titleCase(state.type), this.colorForType(state.type));
 
-    this.button(88, 988, 86, 46, 'MODE', () => cycle('mode', EDITOR_MODES), { size: 15, fill: state.mode === 'manual' ? 0x6b4b18 : 0x1f3a5f, stroke: state.mode === 'manual' ? COLORS.gold : 0x45526a });
-    this.button(190, 988, 86, 46, state.mode === 'manual' ? 'TOOL' : 'SHAPE', () => cycle(state.mode === 'manual' ? 'manualTool' : 'shape', state.mode === 'manual' ? EDITOR_MANUAL_TOOLS : EDITOR_SHAPES), { size: 15, fill: 0x1f3a5f });
-    this.button(292, 988, 86, 46, state.mode === 'manual' ? 'SNAP' : 'PART', () => (state.mode === 'manual' ? this.toggleGridSnap() : cycle('part', EDITOR_PARTS)), { size: 15, fill: state.mode === 'manual' && state.gridSnap ? 0x6b4b18 : 0x1f3a5f, stroke: state.mode === 'manual' && state.gridSnap ? COLORS.gold : 0x45526a });
-    this.button(394, 988, 86, 46, 'TYPE', () => cycle('type', EDITOR_TYPES), { size: 15, fill: 0x1f3a5f });
-    this.button(508, 988, 118, 46, state.mode === 'manual' ? 'CLEAR' : 'RANDOM', () => (state.mode === 'manual' ? this.clearManualEditor() : this.randomizeEditor()), { size: 15, fill: 0x3f2f56, stroke: 0xc084fc });
-    this.button(686, 988, 200, 46, 'TEST PLAY', () => this.startEditorTest(), { size: 18, fill: 0x2c6f84, stroke: 0x5eead4 });
+    this.button(88, 1000, 86, 44, 'MODE', () => cycle('mode', EDITOR_MODES), { size: 14, fill: state.mode === 'manual' ? 0x6b4b18 : 0x1f3a5f, stroke: state.mode === 'manual' ? COLORS.gold : 0x45526a });
+    this.button(190, 1000, 86, 44, state.mode === 'manual' ? 'TOOL' : 'SHAPE', () => cycle(state.mode === 'manual' ? 'manualTool' : 'shape', state.mode === 'manual' ? EDITOR_MANUAL_TOOLS : EDITOR_SHAPES), { size: 14, fill: 0x1f3a5f });
+    this.button(292, 1000, 86, 44, state.mode === 'manual' ? 'SNAP' : 'PART', () => (state.mode === 'manual' ? this.toggleGridSnap() : cycle('part', EDITOR_PARTS)), { size: 14, fill: state.mode === 'manual' && state.gridSnap ? 0x6b4b18 : 0x1f3a5f, stroke: state.mode === 'manual' && state.gridSnap ? COLORS.gold : 0x45526a });
+    this.button(394, 1000, 86, 44, 'TYPE', () => cycle('type', EDITOR_TYPES), { size: 14, fill: 0x1f3a5f });
+    this.button(508, 1000, 118, 44, state.mode === 'manual' ? 'CLEAR' : 'RANDOM', () => (state.mode === 'manual' ? this.clearManualEditor() : this.randomizeEditor()), { size: 14, fill: 0x3f2f56, stroke: 0xc084fc });
+    this.button(686, 1000, 200, 44, 'TEST PLAY', () => this.startEditorTest(), { size: 17, fill: 0x2c6f84, stroke: 0x5eead4, primary: true });
 
-    this.add.text(78, 1050, state.mode === 'manual' ? `MODE ${state.mode.toUpperCase()}` : `COUNT ${state.count}`, { fontFamily: 'Verdana', fontSize: 18, color: COLORS.text });
-    this.add.text(258, 1050, state.mode === 'manual' ? `TOOL ${state.manualTool.toUpperCase()}` : `RADIUS ${state.radius}`, { fontFamily: 'Verdana', fontSize: 18, color: COLORS.text });
-    this.add.text(458, 1050, state.mode === 'manual' ? `SNAP ${state.gridSnap ? 'ON' : 'OFF'}` : `TURNS ${state.turns}`, { fontFamily: 'Verdana', fontSize: 18, color: COLORS.text });
-    this.add.text(638, 1050, `BALLS ${state.balls}`, { fontFamily: 'Verdana', fontSize: 18, color: COLORS.text });
+    this.addLabel(78, 1052, state.mode === 'manual' ? `MODE ${this.titleCase(state.mode)}` : `COUNT ${state.count}`, { family: 'Verdana', size: 16, color: COLORS.text, shadow: false });
+    this.addLabel(258, 1052, state.mode === 'manual' ? `TOOL ${this.titleCase(state.manualTool)}` : `RADIUS ${state.radius}`, { family: 'Verdana', size: 16, color: COLORS.text, shadow: false });
+    this.addLabel(458, 1052, state.mode === 'manual' ? `SNAP ${state.gridSnap ? 'ON' : 'OFF'}` : `TURNS ${state.turns}`, { family: 'Verdana', size: 16, color: COLORS.text, shadow: false });
+    this.addLabel(638, 1052, `BALLS ${state.balls}`, { family: 'Verdana', size: 16, color: COLORS.text, shadow: false });
 
-    this.button(95, 1102, 62, 42, state.mode === 'manual' ? 'UNDO' : '-8', () => (state.mode === 'manual' ? this.undoEditorHistory() : adjust('count', -8)), { size: 15 });
-    this.button(170, 1102, 62, 42, state.mode === 'manual' ? 'ORNG' : '+8', () => (state.mode === 'manual' ? this.setManualType('orange') : adjust('count', 8)), { size: 15 });
-    this.button(278, 1102, 62, 42, state.mode === 'manual' ? 'BLUE' : '-20', () => (state.mode === 'manual' ? this.setManualType('blue') : adjust('radius', -20)), { size: 15 });
-    this.button(354, 1102, 62, 42, state.mode === 'manual' ? 'GREEN' : '+20', () => (state.mode === 'manual' ? this.setManualType('green') : adjust('radius', 20)), { size: 13 });
-    this.button(476, 1102, 62, 42, state.mode === 'manual' ? 'BRICK' : '-1', () => (state.mode === 'manual' ? this.setManualTool('brick') : adjust('turns', -1)), { size: 13 });
-    this.button(552, 1102, 62, 42, state.mode === 'manual' ? 'RAIL' : '+1', () => (state.mode === 'manual' ? this.setManualTool('rail') : adjust('turns', 1)), { size: 14 });
+    this.button(95, 1102, 62, 42, state.mode === 'manual' ? 'UNDO' : '-8', () => (state.mode === 'manual' ? this.undoEditorHistory() : adjust('count', -8)), { size: 14 });
+    this.button(170, 1102, 62, 42, state.mode === 'manual' ? 'ORNG' : '+8', () => (state.mode === 'manual' ? this.setManualType('orange') : adjust('count', 8)), { size: 14, fill: state.mode === 'manual' ? 0x64351f : COLORS.panel2, stroke: state.mode === 'manual' ? COLORS.orange : 0x52617b });
+    this.button(278, 1102, 62, 42, state.mode === 'manual' ? 'BLUE' : '-20', () => (state.mode === 'manual' ? this.setManualType('blue') : adjust('radius', -20)), { size: 14, fill: state.mode === 'manual' ? 0x1f3a5f : COLORS.panel2, stroke: state.mode === 'manual' ? COLORS.blue : 0x52617b });
+    this.button(354, 1102, 62, 42, state.mode === 'manual' ? 'GREEN' : '+20', () => (state.mode === 'manual' ? this.setManualType('green') : adjust('radius', 20)), { size: 12, fill: state.mode === 'manual' ? 0x1d4b36 : COLORS.panel2, stroke: state.mode === 'manual' ? COLORS.green : 0x52617b });
+    this.button(476, 1102, 62, 42, state.mode === 'manual' ? 'BRICK' : '-1', () => (state.mode === 'manual' ? this.setManualTool('brick') : adjust('turns', -1)), { size: 12 });
+    this.button(552, 1102, 62, 42, state.mode === 'manual' ? 'RAIL' : '+1', () => (state.mode === 'manual' ? this.setManualTool('rail') : adjust('turns', 1)), { size: 13 });
     this.button(662, 1102, 62, 42, '-1', () => adjust('balls', -1), { size: 16 });
     this.button(738, 1102, 62, 42, '+1', () => adjust('balls', 1), { size: 16 });
 
@@ -1270,9 +1333,20 @@ class PegFanScene extends Phaser.Scene {
   }
 
   createGameUi() {
-    this.scoreText = this.add.text(48, 112, '', { fontFamily: 'Verdana', fontSize: 24, fontStyle: '700', color: COLORS.text });
-    this.goalText = this.add.text(48, 150, '', { fontFamily: 'Meiryo, Verdana', fontSize: 22, color: COLORS.muted });
-    this.button(778, 70, 164, 50, 'メニュー', () => this.showMenu(), { size: 20 });
+    this.addPanel(288, 126, 500, 86, { fill: 0x0a1322, stroke: 0x2d3d58, accent: COLORS.gold, accentAlpha: 0.12 });
+    this.scoreText = this.add.text(58, 104, '', {
+      fontFamily: 'Verdana',
+      fontSize: 23,
+      fontStyle: '700',
+      color: COLORS.text,
+      shadow: { offsetX: 0, offsetY: 2, color: '#000000', blur: 4, fill: true },
+    });
+    this.goalText = this.add.text(58, 142, '', {
+      fontFamily: 'Meiryo, Verdana',
+      fontSize: 19,
+      color: COLORS.muted,
+    });
+    this.button(778, 70, 164, 50, 'メニュー', () => this.showMenu(), { size: 19 });
   }
 
   trackMatterBody(gameObject, bodyRole, extra = {}) {
@@ -1883,7 +1957,7 @@ class PegFanScene extends Phaser.Scene {
         this.playSfx('reward', { volume: 0.78 });
         this.showRewardViewer(rewardNumber, 'game');
       }, { fill: 0x4a3d21, stroke: COLORS.gold, size: 21 });
-      this.resultOverlay.add([expand.rect, expand.text]);
+      this.resultOverlay.add(Object.values(expand));
     }
 
     if (isEditorTest) {
@@ -1909,7 +1983,7 @@ class PegFanScene extends Phaser.Scene {
         stroke: COLORS.gold,
         size: 24,
       });
-      this.resultOverlay.add([adButton.rect, adButton.text]);
+      this.resultOverlay.add(Object.values(adButton));
       this.resultOverlay.add(this.add.text(WIDTH / 2, HEIGHT / 2 + 92, 'PLACEMENT: rewarded_continue_dummy', {
         fontFamily: 'Verdana',
         fontSize: 16,
@@ -1920,14 +1994,14 @@ class PegFanScene extends Phaser.Scene {
     if (isEditorTest) {
       const retry = this.button(WIDTH / 2 - 185, HEIGHT / 2 + 92, 260, 64, 'RETEST', () => this.startEditorTest(), { fill: 0x2c6f84 });
       const edit = this.button(WIDTH / 2 + 185, HEIGHT / 2 + 92, 260, 64, 'EDITOR', () => this.showStageEditor(), { fill: 0x334155, stroke: 0x93c5fd });
-      this.resultOverlay.add([retry.rect, retry.text, edit.rect, edit.text]);
+      this.resultOverlay.add([...Object.values(retry), ...Object.values(edit)]);
     } else {
       const next = Math.min(TOTAL_LEVELS, level + 1);
       const y = success ? 1032 : canContinue ? HEIGHT / 2 + 178 : HEIGHT / 2 + 48;
       const retry = this.button(WIDTH / 2 - 185, y, 260, 64, success && level < TOTAL_LEVELS ? '次へ' : '再挑戦', () => this.startLevel(success && level < TOTAL_LEVELS ? next : level), { fill: 0x2c6f84 });
       const select = this.button(WIDTH / 2 + 185, y, 260, 64, '選択へ', () => this.showLevelSelect());
       const gallery = this.button(WIDTH / 2, y + 90, 300, 58, 'ギャラリー', () => this.showGallery(), { fill: 0x4a3d21, stroke: COLORS.gold });
-      this.resultOverlay.add([retry.rect, retry.text, select.rect, select.text, gallery.rect, gallery.text]);
+      this.resultOverlay.add([...Object.values(retry), ...Object.values(select), ...Object.values(gallery)]);
     }
   }
 
