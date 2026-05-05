@@ -39,8 +39,20 @@ const SOUND_ASSETS = {
 const EDITOR_SHAPES = ['circle', 'spiral', 'bezier', 'wave', 'grid'];
 const EDITOR_PARTS = ['mixed', 'pegs', 'bricks', 'rails', 'bumpers'];
 const EDITOR_TYPES = ['auto', 'orange', 'blue', 'green', 'purple'];
-const EDITOR_MODES = ['procedural', 'manual'];
-const EDITOR_MANUAL_TOOLS = ['peg', 'brick', 'rail', 'bumper', 'erase'];
+const EDITOR_MODES = ['concept', 'procedural', 'manual'];
+const EDITOR_MANUAL_TOOLS = ['peg', 'brick', 'rail', 'bumper', 'timed', 'spinner', 'erase'];
+const EDITOR_CONCEPTS = [
+  { key: 'open arcs', label: 'OPEN ARCS', description: '角度学習用の開いた弧と下段セーフティレール。' },
+  { key: 'cross lanes', label: 'CROSS LANES', description: '左右から交差するレーンと斜め反射。' },
+  { key: 'spiral core', label: 'SPIRAL CORE', description: '中央へ吸い込ませる螺旋と回転ギミック。' },
+  { key: 'timed waves', label: 'TIMED WAVES', description: '波形配置と時間で消えるブロック。' },
+  { key: 'maze gates', label: 'MAZE GATES', description: '隙間を通すゲート型ペグ迷路。' },
+  { key: 'twin orbits', label: 'TWIN ORBITS', description: '2つの軌道、中央ターゲット、バンパー。' },
+  { key: 'moving ribbons', label: 'MOVING RIBBONS', description: '動くペグ列とタイミング要求。' },
+  { key: 'rail gauntlet', label: 'RAIL GAUNTLET', description: '連続レール反射を使う耐久配置。' },
+  { key: 'clockwork rings', label: 'CLOCKWORK', description: '同心円と回転体でリズムを作る配置。' },
+  { key: 'final exam', label: 'FINAL EXAM', description: '複数ギミックを組み合わせた最終試験。' },
+];
 const EDITOR_GRID = 32;
 const MANUAL_BRICK_THICKNESS = 18;
 const MANUAL_RAIL_THICKNESS = 13;
@@ -84,7 +96,9 @@ function loadEditorState() {
     turns: 3,
     spread: 1,
     balls: 10,
-    mode: 'procedural',
+    mode: 'concept',
+    conceptIndex: 0,
+    conceptAct: 0,
     manualTool: 'peg',
     gridSnap: false,
     manualObjects: [],
@@ -103,12 +117,17 @@ function saveEditorState(state) {
 function clampEditorState(state) {
   return {
     ...state,
+    shape: EDITOR_SHAPES.includes(state.shape) ? state.shape : 'circle',
+    part: EDITOR_PARTS.includes(state.part) ? state.part : 'mixed',
+    type: EDITOR_TYPES.includes(state.type) ? state.type : 'auto',
     count: Phaser.Math.Clamp(Math.round(state.count), 12, 140),
     radius: Phaser.Math.Clamp(Math.round(state.radius), 80, 380),
     turns: Phaser.Math.Clamp(Math.round(state.turns), 1, 8),
     spread: Phaser.Math.Clamp(Number(state.spread), 0.55, 1.45),
     balls: Phaser.Math.Clamp(Math.round(state.balls), 5, 18),
     mode: EDITOR_MODES.includes(state.mode) ? state.mode : 'procedural',
+    conceptIndex: Phaser.Math.Clamp(Math.round(state.conceptIndex ?? 0), 0, EDITOR_CONCEPTS.length - 1),
+    conceptAct: Phaser.Math.Clamp(Math.round(state.conceptAct ?? 0), 0, 9),
     manualTool: EDITOR_MANUAL_TOOLS.includes(state.manualTool) ? state.manualTool : 'peg',
     gridSnap: Boolean(state.gridSnap),
     manualObjects: Array.isArray(state.manualObjects) ? state.manualObjects.slice(0, 240) : [],
@@ -749,14 +768,22 @@ class PegFanScene extends Phaser.Scene {
     this.addBackground('STAGE EDITOR');
     this.button(756, 72, 190, 52, '戻る', () => this.showMenu(), { size: 20 });
 
-    this.addLabel(54, 118, this.editorState.mode === 'manual' ? 'MANUAL LAYOUT BUILDER' : 'PROCEDURAL LAYOUT BUILDER', {
+    const header = this.editorState.mode === 'manual'
+      ? 'MANUAL LAYOUT BUILDER'
+      : this.editorState.mode === 'concept'
+        ? 'CONCEPT BLUEPRINT BUILDER'
+        : 'PROCEDURAL LAYOUT BUILDER';
+    const description = this.editorState.mode === 'manual'
+      ? '自由配置が基本です。SNAP ON の時だけ、グリッドが入力補助として働きます。ドラッグで連続ブロックやレールを作成できます。'
+      : this.editorState.mode === 'concept'
+        ? `${EDITOR_CONCEPTS[this.editorState.conceptIndex].description} VARIANT ${this.editorState.conceptAct + 1}/10 を直接テスト、または手動配置へ展開できます。`
+        : '円 / らせん / ベジェ / 波 / グリッドで自動配置。brick / rail は連続した4頂点ブロックとして生成されます。';
+    this.addLabel(54, 118, header, {
       family: 'Verdana',
       size: 22,
       color: '#93c5fd',
     });
-    this.addLabel(54, 154, this.editorState.mode === 'manual'
-      ? '自由配置が基本です。SNAP ON の時だけ、グリッドが入力補助として働きます。ドラッグで連続ブロックやレールを作成できます。'
-      : '円 / らせん / ベジェ / 波 / グリッドで自動配置。brick / rail は連続した4頂点ブロックとして生成されます。', {
+    this.addLabel(54, 154, description, {
       size: 17,
       color: COLORS.muted,
       wordWrap: { width: 760 },
@@ -778,30 +805,56 @@ class PegFanScene extends Phaser.Scene {
       state[key] += delta;
       this.updateEditorState(state);
     };
+    const adjustConcept = (key, delta) => {
+      state[key] += delta;
+      this.updateEditorState(state);
+    };
+    const secondaryLabel = state.mode === 'manual' ? 'TOOL' : state.mode === 'concept' ? 'CONCEPT' : 'SHAPE';
+    const secondaryAction = () => {
+      if (state.mode === 'manual') cycle('manualTool', EDITOR_MANUAL_TOOLS);
+      else if (state.mode === 'concept') adjustConcept('conceptIndex', 1);
+      else cycle('shape', EDITOR_SHAPES);
+    };
+    const tertiaryLabel = state.mode === 'manual' ? 'SNAP' : state.mode === 'concept' ? 'VARIANT' : 'PART';
+    const tertiaryAction = () => {
+      if (state.mode === 'manual') this.toggleGridSnap();
+      else if (state.mode === 'concept') adjustConcept('conceptAct', 1);
+      else cycle('part', EDITOR_PARTS);
+    };
+    const quaternaryLabel = state.mode === 'concept' ? 'BAKE' : 'TYPE';
+    const quaternaryAction = () => (state.mode === 'concept' ? this.bakeConceptToManual() : cycle('type', EDITOR_TYPES));
+    const randomLabel = state.mode === 'manual' ? 'CLEAR' : 'RANDOM';
+    const randomAction = () => (state.mode === 'manual' ? this.clearManualEditor() : this.randomizeEditor());
 
     this.addPanel(450, 1035, 812, 232, { fill: 0x0f1828, stroke: 0x334155, accent: COLORS.cyan, accentAlpha: 0.16 });
-    this.addStatPill(166, 936, 190, state.mode === 'manual' ? 'MODE' : 'SHAPE', state.mode === 'manual' ? this.titleCase(state.mode) : this.titleCase(state.shape), COLORS.cyan);
-    this.addStatPill(386, 936, 190, state.mode === 'manual' ? 'TOOL' : 'PART', state.mode === 'manual' ? this.titleCase(state.manualTool) : this.titleCase(state.part), COLORS.gold);
-    this.addStatPill(606, 936, 190, 'TYPE', this.titleCase(state.type), this.colorForType(state.type));
+    if (state.mode === 'concept') {
+      this.addStatPill(200, 936, 260, 'CONCEPT', EDITOR_CONCEPTS[state.conceptIndex].label, COLORS.cyan);
+      this.addStatPill(460, 936, 180, 'VARIANT', `${state.conceptAct + 1} / 10`, COLORS.gold);
+      this.addStatPill(660, 936, 170, 'SOURCE', `L${this.conceptLevelNumber()}`, COLORS.green);
+    } else {
+      this.addStatPill(166, 936, 190, state.mode === 'manual' ? 'MODE' : 'SHAPE', state.mode === 'manual' ? this.titleCase(state.mode) : this.titleCase(state.shape), COLORS.cyan);
+      this.addStatPill(386, 936, 190, state.mode === 'manual' ? 'TOOL' : 'PART', state.mode === 'manual' ? this.titleCase(state.manualTool) : this.titleCase(state.part), COLORS.gold);
+      this.addStatPill(606, 936, 190, 'TYPE', this.titleCase(state.type), this.colorForType(state.type));
+    }
 
     this.button(88, 1000, 86, 44, 'MODE', () => cycle('mode', EDITOR_MODES), { size: 14, fill: state.mode === 'manual' ? 0x6b4b18 : 0x1f3a5f, stroke: state.mode === 'manual' ? COLORS.gold : 0x45526a });
-    this.button(190, 1000, 86, 44, state.mode === 'manual' ? 'TOOL' : 'SHAPE', () => cycle(state.mode === 'manual' ? 'manualTool' : 'shape', state.mode === 'manual' ? EDITOR_MANUAL_TOOLS : EDITOR_SHAPES), { size: 14, fill: 0x1f3a5f });
-    this.button(292, 1000, 86, 44, state.mode === 'manual' ? 'SNAP' : 'PART', () => (state.mode === 'manual' ? this.toggleGridSnap() : cycle('part', EDITOR_PARTS)), { size: 14, fill: state.mode === 'manual' && state.gridSnap ? 0x6b4b18 : 0x1f3a5f, stroke: state.mode === 'manual' && state.gridSnap ? COLORS.gold : 0x45526a });
-    this.button(394, 1000, 86, 44, 'TYPE', () => cycle('type', EDITOR_TYPES), { size: 14, fill: 0x1f3a5f });
-    this.button(508, 1000, 118, 44, state.mode === 'manual' ? 'CLEAR' : 'RANDOM', () => (state.mode === 'manual' ? this.clearManualEditor() : this.randomizeEditor()), { size: 14, fill: 0x3f2f56, stroke: 0xc084fc });
+    this.button(190, 1000, 86, 44, secondaryLabel, secondaryAction, { size: state.mode === 'concept' ? 11 : 14, fill: 0x1f3a5f });
+    this.button(292, 1000, 86, 44, tertiaryLabel, tertiaryAction, { size: state.mode === 'concept' ? 11 : 14, fill: state.mode === 'manual' && state.gridSnap ? 0x6b4b18 : 0x1f3a5f, stroke: state.mode === 'manual' && state.gridSnap ? COLORS.gold : 0x45526a });
+    this.button(394, 1000, 86, 44, quaternaryLabel, quaternaryAction, { size: 14, fill: state.mode === 'concept' ? 0x4a3d21 : 0x1f3a5f, stroke: state.mode === 'concept' ? COLORS.gold : 0x45526a });
+    this.button(508, 1000, 118, 44, randomLabel, randomAction, { size: 14, fill: 0x3f2f56, stroke: 0xc084fc });
     this.button(686, 1000, 200, 44, 'TEST PLAY', () => this.startEditorTest(), { size: 17, fill: 0x2c6f84, stroke: 0x5eead4, primary: true });
 
-    this.addLabel(78, 1052, state.mode === 'manual' ? `MODE ${this.titleCase(state.mode)}` : `COUNT ${state.count}`, { family: 'Verdana', size: 16, color: COLORS.text, shadow: false });
-    this.addLabel(258, 1052, state.mode === 'manual' ? `TOOL ${this.titleCase(state.manualTool)}` : `RADIUS ${state.radius}`, { family: 'Verdana', size: 16, color: COLORS.text, shadow: false });
-    this.addLabel(458, 1052, state.mode === 'manual' ? `SNAP ${state.gridSnap ? 'ON' : 'OFF'}` : `TURNS ${state.turns}`, { family: 'Verdana', size: 16, color: COLORS.text, shadow: false });
+    this.addLabel(78, 1052, state.mode === 'manual' ? `MODE ${this.titleCase(state.mode)}` : state.mode === 'concept' ? `CONCEPT ${state.conceptIndex + 1}` : `COUNT ${state.count}`, { family: 'Verdana', size: 16, color: COLORS.text, shadow: false });
+    this.addLabel(258, 1052, state.mode === 'manual' ? `TOOL ${this.titleCase(state.manualTool)}` : state.mode === 'concept' ? `VARIANT ${state.conceptAct + 1}` : `RADIUS ${state.radius}`, { family: 'Verdana', size: 16, color: COLORS.text, shadow: false });
+    this.addLabel(458, 1052, state.mode === 'manual' ? `SNAP ${state.gridSnap ? 'ON' : 'OFF'}` : state.mode === 'concept' ? 'BAKE TO MANUAL' : `TURNS ${state.turns}`, { family: 'Verdana', size: 16, color: COLORS.text, shadow: false });
     this.addLabel(638, 1052, `BALLS ${state.balls}`, { family: 'Verdana', size: 16, color: COLORS.text, shadow: false });
 
-    this.button(95, 1102, 62, 42, state.mode === 'manual' ? 'UNDO' : '-8', () => (state.mode === 'manual' ? this.undoEditorHistory() : adjust('count', -8)), { size: 14 });
-    this.button(170, 1102, 62, 42, state.mode === 'manual' ? 'ORNG' : '+8', () => (state.mode === 'manual' ? this.setManualType('orange') : adjust('count', 8)), { size: 14, fill: state.mode === 'manual' ? 0x64351f : COLORS.panel2, stroke: state.mode === 'manual' ? COLORS.orange : 0x52617b });
-    this.button(278, 1102, 62, 42, state.mode === 'manual' ? 'BLUE' : '-20', () => (state.mode === 'manual' ? this.setManualType('blue') : adjust('radius', -20)), { size: 14, fill: state.mode === 'manual' ? 0x1f3a5f : COLORS.panel2, stroke: state.mode === 'manual' ? COLORS.blue : 0x52617b });
-    this.button(354, 1102, 62, 42, state.mode === 'manual' ? 'GREEN' : '+20', () => (state.mode === 'manual' ? this.setManualType('green') : adjust('radius', 20)), { size: 12, fill: state.mode === 'manual' ? 0x1d4b36 : COLORS.panel2, stroke: state.mode === 'manual' ? COLORS.green : 0x52617b });
-    this.button(476, 1102, 62, 42, state.mode === 'manual' ? 'BRICK' : '-1', () => (state.mode === 'manual' ? this.setManualTool('brick') : adjust('turns', -1)), { size: 12 });
-    this.button(552, 1102, 62, 42, state.mode === 'manual' ? 'RAIL' : '+1', () => (state.mode === 'manual' ? this.setManualTool('rail') : adjust('turns', 1)), { size: 13 });
+    this.button(95, 1102, 62, 42, state.mode === 'manual' ? 'UNDO' : state.mode === 'concept' ? '-C' : '-8', () => (state.mode === 'manual' ? this.undoEditorHistory() : state.mode === 'concept' ? adjustConcept('conceptIndex', -1) : adjust('count', -8)), { size: 14 });
+    this.button(170, 1102, 62, 42, state.mode === 'manual' ? 'ORNG' : state.mode === 'concept' ? '+C' : '+8', () => (state.mode === 'manual' ? this.setManualType('orange') : state.mode === 'concept' ? adjustConcept('conceptIndex', 1) : adjust('count', 8)), { size: 14, fill: state.mode === 'manual' ? 0x64351f : COLORS.panel2, stroke: state.mode === 'manual' ? COLORS.orange : 0x52617b });
+    this.button(278, 1102, 62, 42, state.mode === 'manual' ? 'BLUE' : state.mode === 'concept' ? '-V' : '-20', () => (state.mode === 'manual' ? this.setManualType('blue') : state.mode === 'concept' ? adjustConcept('conceptAct', -1) : adjust('radius', -20)), { size: 14, fill: state.mode === 'manual' ? 0x1f3a5f : COLORS.panel2, stroke: state.mode === 'manual' ? COLORS.blue : 0x52617b });
+    this.button(354, 1102, 62, 42, state.mode === 'manual' ? 'GREEN' : state.mode === 'concept' ? '+V' : '+20', () => (state.mode === 'manual' ? this.setManualType('green') : state.mode === 'concept' ? adjustConcept('conceptAct', 1) : adjust('radius', 20)), { size: 12, fill: state.mode === 'manual' ? 0x1d4b36 : COLORS.panel2, stroke: state.mode === 'manual' ? COLORS.green : 0x52617b });
+    this.button(476, 1102, 62, 42, state.mode === 'manual' ? 'BRICK' : state.mode === 'concept' ? 'BAKE' : '-1', () => (state.mode === 'manual' ? this.setManualTool('brick') : state.mode === 'concept' ? this.bakeConceptToManual() : adjust('turns', -1)), { size: state.mode === 'concept' ? 11 : 12, fill: state.mode === 'concept' ? 0x4a3d21 : COLORS.panel2, stroke: state.mode === 'concept' ? COLORS.gold : 0x52617b });
+    this.button(552, 1102, 62, 42, state.mode === 'manual' ? 'RAIL' : state.mode === 'concept' ? 'PLAY' : '+1', () => (state.mode === 'manual' ? this.setManualTool('rail') : state.mode === 'concept' ? this.startEditorTest() : adjust('turns', 1)), { size: 13 });
     this.button(662, 1102, 62, 42, '-1', () => adjust('balls', -1), { size: 16 });
     this.button(738, 1102, 62, 42, '+1', () => adjust('balls', 1), { size: 16 });
 
@@ -817,18 +870,67 @@ class PegFanScene extends Phaser.Scene {
 
   randomizeEditor() {
     const rand = seededRandom(Date.now() % 1000000);
-    this.editorState = clampEditorState({
-      shape: EDITOR_SHAPES[Math.floor(rand() * EDITOR_SHAPES.length)],
-      part: EDITOR_PARTS[Math.floor(rand() * EDITOR_PARTS.length)],
-      type: EDITOR_TYPES[Math.floor(rand() * EDITOR_TYPES.length)],
-      count: 28 + Math.floor(rand() * 84),
-      radius: 140 + Math.floor(rand() * 210),
-      turns: 2 + Math.floor(rand() * 5),
-      spread: 0.75 + rand() * 0.55,
-      balls: 7 + Math.floor(rand() * 7),
-    });
+    if (this.editorState.mode === 'concept') {
+      this.editorState = clampEditorState({
+        ...this.editorState,
+        conceptIndex: Math.floor(rand() * EDITOR_CONCEPTS.length),
+        conceptAct: Math.floor(rand() * 10),
+        balls: 7 + Math.floor(rand() * 7),
+      });
+    } else {
+      this.editorState = clampEditorState({
+        ...this.editorState,
+        shape: EDITOR_SHAPES[Math.floor(rand() * EDITOR_SHAPES.length)],
+        part: EDITOR_PARTS[Math.floor(rand() * EDITOR_PARTS.length)],
+        type: EDITOR_TYPES[Math.floor(rand() * EDITOR_TYPES.length)],
+        count: 28 + Math.floor(rand() * 84),
+        radius: 140 + Math.floor(rand() * 210),
+        turns: 2 + Math.floor(rand() * 5),
+        spread: 0.75 + rand() * 0.55,
+        balls: 7 + Math.floor(rand() * 7),
+      });
+    }
     saveEditorState(this.editorState);
     this.showStageEditor();
+  }
+
+  conceptLevelNumber() {
+    const state = this.editorState ?? loadEditorState();
+    return state.conceptIndex * 10 + state.conceptAct + 1;
+  }
+
+  buildConceptLevel() {
+    const level = generateLevel(this.conceptLevelNumber());
+    return {
+      ...level,
+      level: 1,
+      editorTest: true,
+      balls: this.editorState.balls,
+      rewardIndex: 0,
+    };
+  }
+
+  bakeConceptToManual() {
+    const level = this.buildConceptLevel();
+    const manualObjects = [
+      ...level.pegs.map((peg) => ({ kind: 'peg', x: peg.x, y: peg.y, type: peg.type ?? 'blue', motion: peg.motion ?? null })),
+      ...level.bricks.map((brick) => ({ kind: 'brick', vertices: normalizeQuad(brick), type: brick.type ?? 'blue' })),
+      ...level.rails.map((rail) => ({ kind: 'rail', vertices: normalizeQuad(rail) })),
+      ...level.bumpers.map((bumper) => ({ kind: 'bumper', x: bumper.x, y: bumper.y, r: bumper.r ?? 28 })),
+      ...level.timedBlocks.map((block) => ({ kind: 'timed', x: block.x, y: block.y, w: block.w, h: block.h, phase: block.phase ?? 0, period: block.period ?? 2600 })),
+      ...level.spinners.map((spinner) => ({ kind: 'spinner', x: spinner.x, y: spinner.y, radius: spinner.radius ?? 56, speed: spinner.speed ?? 0.9, phase: spinner.phase ?? 0 })),
+    ];
+    this.editorState = clampEditorState({
+      ...this.editorState,
+      mode: 'manual',
+      manualTool: 'peg',
+      manualObjects,
+    });
+    this.editorHistory = [];
+    this.editorRedo = [];
+    saveEditorState(this.editorState);
+    this.showStageEditor();
+    this.editorToast('CONCEPT BAKED');
   }
 
   saveEditorTemplate() {
@@ -968,6 +1070,8 @@ class PegFanScene extends Phaser.Scene {
     if (tool === 'brick') this.addManualObject({ kind: 'brick', vertices: quadFromCenter(point.x, point.y, 88, MANUAL_BRICK_THICKNESS, 0), type });
     if (tool === 'rail') this.addManualObject({ kind: 'rail', vertices: quadFromCenter(point.x, point.y, 128, MANUAL_RAIL_THICKNESS, 0) });
     if (tool === 'bumper') this.addManualObject({ kind: 'bumper', x: point.x, y: point.y, r: 28 });
+    if (tool === 'timed') this.addManualObject({ kind: 'timed', x: point.x, y: point.y, w: 180, h: 22, phase: 0, period: 2600 });
+    if (tool === 'spinner') this.addManualObject({ kind: 'spinner', x: point.x, y: point.y, radius: 58, speed: 0.9, phase: 0 });
   }
 
   createManualLine(start, end) {
@@ -980,7 +1084,7 @@ class PegFanScene extends Phaser.Scene {
     }
     const tool = this.editorState.manualTool;
     const type = this.manualType();
-    const spacing = tool === 'peg' ? 38 : tool === 'bumper' ? 58 : tool === 'rail' ? 96 : 74;
+    const spacing = tool === 'peg' ? 38 : tool === 'bumper' ? 58 : tool === 'spinner' ? 120 : tool === 'timed' ? 150 : tool === 'rail' ? 96 : 74;
     const objects = [];
     if (tool === 'brick') {
       objects.push({ kind: 'brick', vertices: segmentQuad(start, end, MANUAL_BRICK_THICKNESS, 3), type });
@@ -1001,6 +1105,8 @@ class PegFanScene extends Phaser.Scene {
       const y = this.editorState.gridSnap ? Math.round(rawY / EDITOR_GRID) * EDITOR_GRID : rawY;
       if (tool === 'peg') objects.push({ kind: 'peg', x, y, type });
       if (tool === 'bumper') objects.push({ kind: 'bumper', x, y, r: 28 });
+      if (tool === 'timed') objects.push({ kind: 'timed', x, y, w: 140, h: 22, phase: i * 0.4, period: 2600 });
+      if (tool === 'spinner') objects.push({ kind: 'spinner', x, y, radius: 48, speed: i % 2 ? -0.9 : 0.9, phase: i * 0.7 });
     }
     this.setManualObjects([...this.editorState.manualObjects, ...objects]);
   }
@@ -1096,11 +1202,15 @@ class PegFanScene extends Phaser.Scene {
     const bricks = [];
     const rails = [];
     const bumpers = [];
+    const timedBlocks = [];
+    const spinners = [];
     this.editorState.manualObjects.forEach((object) => {
-      if (object.kind === 'peg') pegs.push({ x: object.x, y: object.y, type: object.type ?? 'blue' });
+      if (object.kind === 'peg') pegs.push({ x: object.x, y: object.y, type: object.type ?? 'blue', motion: object.motion ?? null });
       if (object.kind === 'brick') bricks.push({ ...object, vertices: normalizeQuad(object), type: object.type ?? 'blue' });
       if (object.kind === 'rail') rails.push({ ...object, vertices: normalizeQuad(object) });
       if (object.kind === 'bumper') bumpers.push({ x: object.x, y: object.y, r: object.r ?? 28 });
+      if (object.kind === 'timed') timedBlocks.push({ x: object.x, y: object.y, w: object.w ?? 160, h: object.h ?? 22, phase: object.phase ?? 0, period: object.period ?? 2600 });
+      if (object.kind === 'spinner') spinners.push({ x: object.x, y: object.y, radius: object.radius ?? 56, speed: object.speed ?? 0.9, phase: object.phase ?? 0 });
     });
     if (!pegs.some((peg) => peg.type === 'orange') && !bricks.some((brick) => brick.type === 'orange')) {
       if (pegs.length) pegs[0].type = 'orange';
@@ -1114,8 +1224,8 @@ class PegFanScene extends Phaser.Scene {
       pegs,
       bricks,
       rails,
-      timedBlocks: [],
-      spinners: [],
+      timedBlocks,
+      spinners,
       bumpers,
       bucketSpeed: 150,
       rewardIndex: 0,
@@ -1182,6 +1292,7 @@ class PegFanScene extends Phaser.Scene {
 
   buildEditorLevel() {
     const s = this.editorState;
+    if (s.mode === 'concept') return this.buildConceptLevel();
     if (s.mode === 'manual') return this.buildManualLevel();
     const points = this.getEditorPoints();
     const pegs = [];
