@@ -8,6 +8,7 @@ const REWARD_COUNT = 100;
 const SAVE_KEY = 'peg-fan-save-v1';
 const EDITOR_SAVE_KEY = 'peg-fan-editor-v1';
 const EDITOR_STAGE_SLOTS_KEY = 'peg-fan-editor-stage-slots-v1';
+const STAGE_OVERRIDE_KEY_PREFIX = 'peg-fan-stage-override-v1-';
 const CANNON_X = WIDTH / 2;
 const CANNON_Y = 168;
 const LAUNCH_SPEED = 660;
@@ -54,8 +55,21 @@ const EDITOR_CONCEPTS = [
   { key: 'clockwork rings', label: 'CLOCKWORK', description: '同心円と回転体でリズムを作る配置。' },
   { key: 'final exam', label: 'FINAL EXAM', description: '複数ギミックを組み合わせた最終試験。' },
 ];
+const EDITOR_CONCEPT_DESCRIPTIONS = [
+  'Open arcs teach bank angles and safe lower rebounds.',
+  'Crossing lanes ask for diagonal reflection shots.',
+  'Spirals pull the ball toward a dense central route.',
+  'Wave patterns mix with timed disappearing blocks.',
+  'Gate gaps turn the board into a readable peg maze.',
+  'Twin rings, center targets, and bumpers create orbit shots.',
+  'Moving peg ribbons reward timing and delayed shots.',
+  'Rail chains push the player into controlled ricochets.',
+  'Concentric rings and spinners create rhythm shots.',
+  'A combined test of arcs, gates, motion, rails, and timing.',
+];
 const EDITOR_GRID = 32;
 const EDITOR_SLOT_COUNT = 6;
+const EDITOR_STAGE_COUNT = 100;
 const MANUAL_BRICK_THICKNESS = 18;
 const MANUAL_RAIL_THICKNESS = 13;
 
@@ -102,8 +116,10 @@ function loadEditorState() {
     conceptIndex: 0,
     conceptAct: 0,
     slotIndex: 0,
+    stageEditLevel: 1,
     manualTool: 'peg',
     gridSnap: false,
+    selectedManualIndex: -1,
     manualObjects: [],
   };
   try {
@@ -146,8 +162,10 @@ function clampEditorState(state) {
     conceptIndex: Phaser.Math.Clamp(Math.round(state.conceptIndex ?? 0), 0, EDITOR_CONCEPTS.length - 1),
     conceptAct: Phaser.Math.Clamp(Math.round(state.conceptAct ?? 0), 0, 9),
     slotIndex: Phaser.Math.Clamp(Math.round(state.slotIndex ?? 0), 0, EDITOR_SLOT_COUNT - 1),
+    stageEditLevel: Phaser.Math.Clamp(Math.round(state.stageEditLevel ?? 1), 1, EDITOR_STAGE_COUNT),
     manualTool: EDITOR_MANUAL_TOOLS.includes(state.manualTool) ? state.manualTool : 'peg',
     gridSnap: Boolean(state.gridSnap),
+    selectedManualIndex: Phaser.Math.Clamp(Math.round(state.selectedManualIndex ?? -1), -1, Math.max(-1, (state.manualObjects?.length ?? 0) - 1)),
     manualObjects: Array.isArray(state.manualObjects) ? state.manualObjects.slice(0, 240) : [],
   };
 }
@@ -158,6 +176,54 @@ function clonePlain(value) {
 
 function centerOfPoints(points) {
   return points.reduce((sum, point) => ({ x: sum.x + point.x / points.length, y: sum.y + point.y / points.length }), { x: 0, y: 0 });
+}
+
+function stageOverrideKey(level) {
+  return `${STAGE_OVERRIDE_KEY_PREFIX}${String(level).padStart(3, '0')}`;
+}
+
+function normalizeLevelForPlay(level, fallbackLevel = 1) {
+  const safe = clonePlain(level ?? {});
+  safe.level = fallbackLevel;
+  safe.pegs = Array.isArray(safe.pegs) ? safe.pegs : [];
+  safe.bricks = Array.isArray(safe.bricks) ? safe.bricks : [];
+  safe.rails = Array.isArray(safe.rails) ? safe.rails : [];
+  safe.timedBlocks = Array.isArray(safe.timedBlocks) ? safe.timedBlocks : [];
+  safe.spinners = Array.isArray(safe.spinners) ? safe.spinners : [];
+  safe.bumpers = Array.isArray(safe.bumpers) ? safe.bumpers : [];
+  safe.balls = Phaser.Math.Clamp(Math.round(safe.balls ?? (11 - Math.floor(fallbackLevel / 22))), 5, 18);
+  safe.targetCount = safe.pegs.filter((peg) => peg.type === 'orange').length
+    + safe.bricks.filter((brick) => brick.type === 'orange').length;
+  safe.bucketSpeed = safe.bucketSpeed ?? (130 + Math.min(135, fallbackLevel * 2.5));
+  safe.rewardIndex = safe.rewardIndex ?? Math.min(4, Math.floor((fallbackLevel - 1) / 20));
+  return safe;
+}
+
+function auditLevelData(level) {
+  const objects = (level.pegs?.length ?? 0)
+    + (level.bricks?.length ?? 0)
+    + (level.rails?.length ?? 0)
+    + (level.timedBlocks?.length ?? 0)
+    + (level.spinners?.length ?? 0)
+    + (level.bumpers?.length ?? 0);
+  const targetCount = level.targetCount ?? 0;
+  const flags = [];
+  if (targetCount < 1) flags.push('NO_ORANGE');
+  if (targetCount > 32) flags.push('TOO_MANY_TARGETS');
+  if ((level.pegs?.length ?? 0) + (level.bricks?.length ?? 0) < 18) flags.push('TOO_SPARSE');
+  if (objects > 145) flags.push('TOO_DENSE');
+  if ((level.balls ?? 0) < 6) flags.push('LOW_BALLS');
+  if (!level.concept && !level.editorTest) flags.push('NO_CONCEPT');
+  return {
+    level: level.level,
+    concept: level.concept ?? 'custom',
+    objects,
+    targetCount,
+    balls: level.balls,
+    moving: (level.pegs ?? []).filter((peg) => peg.motion).length,
+    hazards: (level.timedBlocks?.length ?? 0) + (level.spinners?.length ?? 0) + (level.rails?.length ?? 0),
+    flags,
+  };
 }
 
 function quadFromCenter(x, y, width, height, angle = 0, skew = 0, taper = 0) {
@@ -462,6 +528,9 @@ class PegFanScene extends Phaser.Scene {
     CHARACTER_ASSETS.forEach((path, index) => this.load.image(`character-${index + 1}`, path));
     REWARD_ASSETS.forEach((path, index) => this.load.image(`reward-${index + 1}`, path));
     Object.entries(SOUND_ASSETS).forEach(([key, path]) => this.load.audio(`sfx-${key}`, path));
+    for (let level = 1; level <= TOTAL_LEVELS; level += 1) {
+      this.load.json(`stage-${level}`, `assets/stages/stage-${String(level).padStart(3, '0')}.json`);
+    }
   }
 
   create() {
@@ -794,7 +863,7 @@ class PegFanScene extends Phaser.Scene {
     const description = this.editorState.mode === 'manual'
       ? '自由配置が基本です。SNAP ON の時だけ、グリッドが入力補助として働きます。ドラッグで連続ブロックやレールを作成できます。'
       : this.editorState.mode === 'concept'
-        ? `${EDITOR_CONCEPTS[this.editorState.conceptIndex].description} VARIANT ${this.editorState.conceptAct + 1}/10 を直接テスト、または手動配置へ展開できます。`
+        ? `${EDITOR_CONCEPT_DESCRIPTIONS[this.editorState.conceptIndex]} VARIANT ${this.editorState.conceptAct + 1}/10 can be tested directly or baked into manual editing.`
         : '円 / らせん / ベジェ / 波 / グリッドで自動配置。brick / rail は連続した4頂点ブロックとして生成されます。';
     this.addLabel(54, 118, header, {
       family: 'Verdana',
@@ -868,12 +937,12 @@ class PegFanScene extends Phaser.Scene {
     this.addLabel(638, 1052, `BALLS ${state.balls}`, { family: 'Verdana', size: 16, color: COLORS.text, shadow: false });
 
     this.button(95, 1102, 62, 42, state.mode === 'manual' ? 'UNDO' : state.mode === 'concept' ? '-C' : '-8', () => (state.mode === 'manual' ? this.undoEditorHistory() : state.mode === 'concept' ? adjustConcept('conceptIndex', -1) : adjust('count', -8)), { size: 14 });
-    this.button(170, 1102, 62, 42, state.mode === 'manual' ? 'ORNG' : state.mode === 'concept' ? '+C' : '+8', () => (state.mode === 'manual' ? this.setManualType('orange') : state.mode === 'concept' ? adjustConcept('conceptIndex', 1) : adjust('count', 8)), { size: 14, fill: state.mode === 'manual' ? 0x64351f : COLORS.panel2, stroke: state.mode === 'manual' ? COLORS.orange : 0x52617b });
-    this.button(278, 1102, 62, 42, state.mode === 'manual' ? 'BLUE' : state.mode === 'concept' ? '-V' : '-20', () => (state.mode === 'manual' ? this.setManualType('blue') : state.mode === 'concept' ? adjustConcept('conceptAct', -1) : adjust('radius', -20)), { size: 14, fill: state.mode === 'manual' ? 0x1f3a5f : COLORS.panel2, stroke: state.mode === 'manual' ? COLORS.blue : 0x52617b });
-    this.button(354, 1102, 62, 42, state.mode === 'manual' ? 'GREEN' : state.mode === 'concept' ? '+V' : '+20', () => (state.mode === 'manual' ? this.setManualType('green') : state.mode === 'concept' ? adjustConcept('conceptAct', 1) : adjust('radius', 20)), { size: 12, fill: state.mode === 'manual' ? 0x1d4b36 : COLORS.panel2, stroke: state.mode === 'manual' ? COLORS.green : 0x52617b });
-    this.button(476, 1102, 62, 42, state.mode === 'manual' ? 'BRICK' : state.mode === 'concept' ? 'BAKE' : '-1', () => (state.mode === 'manual' ? this.setManualTool('brick') : state.mode === 'concept' ? this.bakeConceptToManual() : adjust('turns', -1)), { size: state.mode === 'concept' ? 11 : 12, fill: state.mode === 'concept' ? 0x4a3d21 : COLORS.panel2, stroke: state.mode === 'concept' ? COLORS.gold : 0x52617b });
-    this.button(552, 1102, 62, 42, state.mode === 'manual' ? 'RAIL' : state.mode === 'concept' ? 'PLAY' : '+1', () => (state.mode === 'manual' ? this.setManualTool('rail') : state.mode === 'concept' ? this.startEditorTest() : adjust('turns', 1)), { size: 13 });
-    this.button(662, 1102, 62, 42, '-1', () => adjust('balls', -1), { size: 16 });
+    this.button(170, 1102, 62, 42, state.mode === 'manual' ? 'SEL-' : state.mode === 'concept' ? '+C' : '+8', () => (state.mode === 'manual' ? this.cycleManualSelection(-1) : state.mode === 'concept' ? adjustConcept('conceptIndex', 1) : adjust('count', 8)), { size: 13, fill: state.mode === 'manual' ? 0x263449 : COLORS.panel2, stroke: state.mode === 'manual' ? 0x93c5fd : 0x52617b });
+    this.button(278, 1102, 62, 42, state.mode === 'manual' ? 'SEL+' : state.mode === 'concept' ? '-V' : '-20', () => (state.mode === 'manual' ? this.cycleManualSelection(1) : state.mode === 'concept' ? adjustConcept('conceptAct', -1) : adjust('radius', -20)), { size: 13, fill: state.mode === 'manual' ? 0x263449 : COLORS.panel2, stroke: state.mode === 'manual' ? 0x93c5fd : 0x52617b });
+    this.button(354, 1102, 62, 42, state.mode === 'manual' ? 'TYPE' : state.mode === 'concept' ? '+V' : '+20', () => (state.mode === 'manual' ? this.cycleSelectedManualType() : state.mode === 'concept' ? adjustConcept('conceptAct', 1) : adjust('radius', 20)), { size: 12, fill: state.mode === 'manual' ? 0x1f3a5f : COLORS.panel2, stroke: state.mode === 'manual' ? COLORS.blue : 0x52617b });
+    this.button(476, 1102, 62, 42, state.mode === 'manual' ? 'PROP-' : state.mode === 'concept' ? 'BAKE' : '-1', () => (state.mode === 'manual' ? this.adjustSelectedManualProperty(-1) : state.mode === 'concept' ? this.bakeConceptToManual() : adjust('turns', -1)), { size: state.mode === 'concept' ? 11 : 10, fill: state.mode === 'concept' ? 0x4a3d21 : COLORS.panel2, stroke: state.mode === 'concept' ? COLORS.gold : 0x52617b });
+    this.button(552, 1102, 62, 42, state.mode === 'manual' ? 'PROP+' : state.mode === 'concept' ? 'PLAY' : '+1', () => (state.mode === 'manual' ? this.adjustSelectedManualProperty(1) : state.mode === 'concept' ? this.startEditorTest() : adjust('turns', 1)), { size: state.mode === 'manual' ? 10 : 13 });
+    this.button(662, 1102, 62, 42, state.mode === 'manual' ? 'DEL' : '-1', () => (state.mode === 'manual' ? this.deleteSelectedManualObject() : adjust('balls', -1)), { size: 14, fill: state.mode === 'manual' ? 0x4b2030 : COLORS.panel2, stroke: state.mode === 'manual' ? COLORS.red : 0x52617b });
     this.button(738, 1102, 62, 42, '+1', () => adjust('balls', 1), { size: 16 });
 
     this.button(122, 1170, 110, 48, `SLOT ${state.slotIndex + 1}`, () => this.cycleEditorSlot(1), { size: 15, fill: 0x263449, stroke: 0x93c5fd });
@@ -881,6 +950,16 @@ class PegFanScene extends Phaser.Scene {
     this.button(398, 1170, 130, 48, 'LOAD', () => this.loadEditorSlot(), { size: 16, fill: 0x334155, stroke: 0x93c5fd });
     this.button(558, 1170, 140, 48, 'EXPORT', () => this.exportEditorJson(), { size: 15, fill: 0x1f3a5f, stroke: COLORS.cyan });
     this.button(718, 1170, 140, 48, 'IMPORT', () => this.importEditorJson(), { size: 15, fill: 0x3f2f56, stroke: 0xc084fc });
+
+    this.button(118, 1230, 108, 42, `LV ${String(state.stageEditLevel).padStart(3, '0')}`, () => this.cycleEditorStage(1), { size: 14, fill: 0x263449, stroke: 0x93c5fd });
+    this.button(220, 1230, 64, 42, '-LV', () => this.cycleEditorStage(-1), { size: 13 });
+    this.button(296, 1230, 64, 42, '+LV', () => this.cycleEditorStage(1), { size: 13 });
+    this.button(414, 1230, 122, 42, 'LOAD LV', () => this.loadEditorStageNumber(), { size: 13, fill: 0x334155, stroke: 0x93c5fd });
+    this.button(548, 1230, 122, 42, 'SAVE LV', () => this.saveEditorStageNumber(), { size: 13, fill: 0x4a3d21, stroke: COLORS.gold });
+    this.button(682, 1230, 96, 42, 'AUDIT', () => this.showStageAudit(), { size: 13, fill: 0x1f3a5f, stroke: COLORS.cyan });
+    if (state.mode === 'manual') {
+      this.button(788, 1230, 76, 42, 'EDIT', () => this.cycleManualSelection(1), { size: 13, fill: state.selectedManualIndex >= 0 ? 0x6b4b18 : 0x263449, stroke: state.selectedManualIndex >= 0 ? COLORS.gold : 0x52617b });
+    }
   }
 
   updateEditorState(nextState) {
@@ -1011,6 +1090,99 @@ class PegFanScene extends Phaser.Scene {
     this.editorToast(`LOADED SLOT ${this.editorState.slotIndex + 1}`);
   }
 
+  cycleEditorStage(dir = 1) {
+    const next = ((this.editorState.stageEditLevel - 1 + dir + EDITOR_STAGE_COUNT) % EDITOR_STAGE_COUNT) + 1;
+    this.editorState = clampEditorState({ ...this.editorState, stageEditLevel: next });
+    saveEditorState(this.editorState);
+    this.showStageEditor();
+  }
+
+  loadStageOverride(levelNumber) {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(stageOverrideKey(levelNumber)) || 'null');
+      const level = parsed?.level ?? parsed;
+      return level ? normalizeLevelForPlay(level, levelNumber) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  loadFixedStage(levelNumber) {
+    const cached = this.cache.json.get(`stage-${levelNumber}`);
+    return cached ? normalizeLevelForPlay(cached, levelNumber) : null;
+  }
+
+  getPlayableLevel(levelNumber) {
+    return this.loadStageOverride(levelNumber)
+      ?? this.loadFixedStage(levelNumber)
+      ?? normalizeLevelForPlay(generateLevel(levelNumber), levelNumber);
+  }
+
+  loadEditorStageNumber() {
+    const levelNumber = this.editorState.stageEditLevel;
+    const level = this.getPlayableLevel(levelNumber);
+    this.applyEditorProject({
+      state: {
+        ...this.editorState,
+        mode: 'manual',
+        manualObjects: this.levelToManualObjects(level),
+        selectedManualIndex: -1,
+        balls: level.balls,
+      },
+      level,
+    });
+    this.editorState.stageEditLevel = levelNumber;
+    saveEditorState(this.editorState);
+    this.editorToast(`LOADED LEVEL ${levelNumber}`);
+  }
+
+  saveEditorStageNumber() {
+    const levelNumber = this.editorState.stageEditLevel;
+    const project = this.serializeEditorProject();
+    project.name = `Stage ${String(levelNumber).padStart(3, '0')}`;
+    project.level = normalizeLevelForPlay({ ...project.level, editorTest: false }, levelNumber);
+    localStorage.setItem(stageOverrideKey(levelNumber), JSON.stringify(project));
+    this.editorToast(`SAVED LEVEL ${levelNumber}`);
+  }
+
+  collectStageAudits() {
+    return Array.from({ length: TOTAL_LEVELS }, (_, index) => {
+      const levelNumber = index + 1;
+      return auditLevelData(this.getPlayableLevel(levelNumber));
+    });
+  }
+
+  showStageAudit() {
+    const audits = this.collectStageAudits();
+    const flagged = audits.filter((audit) => audit.flags.length);
+    const avgTargets = audits.reduce((sum, audit) => sum + audit.targetCount, 0) / audits.length;
+    const avgObjects = audits.reduce((sum, audit) => sum + audit.objects, 0) / audits.length;
+    const overlay = this.add.container(0, 0).setDepth(80);
+    overlay.add(this.add.rectangle(WIDTH / 2, HEIGHT / 2, 760, 850, 0x0b111b, 0.97).setStrokeStyle(2, COLORS.cyan));
+    overlay.add(this.add.text(WIDTH / 2, 260, 'STAGE AUDIT', {
+      fontFamily: 'Verdana',
+      fontSize: 42,
+      fontStyle: '700',
+      color: '#34d3e5',
+    }).setOrigin(0.5));
+    overlay.add(this.add.text(WIDTH / 2, 328, `AVG OBJECTS ${avgObjects.toFixed(1)}   AVG ORANGE ${avgTargets.toFixed(1)}   FLAGGED ${flagged.length}`, {
+      fontFamily: 'Verdana',
+      fontSize: 20,
+      color: COLORS.text,
+    }).setOrigin(0.5));
+    const lines = (flagged.length ? flagged : audits.slice(0, 12)).slice(0, 18).map((audit) => (
+      `L${String(audit.level).padStart(3, '0')} ${audit.concept}  OBJ ${audit.objects}  ORG ${audit.targetCount}  BALL ${audit.balls}  ${audit.flags.join(',') || 'OK'}`
+    ));
+    overlay.add(this.add.text(110, 386, lines.join('\n'), {
+      fontFamily: 'Consolas, Verdana',
+      fontSize: 17,
+      lineSpacing: 8,
+      color: flagged.length ? '#ffd35a' : '#dbeafe',
+    }));
+    const close = this.button(WIDTH / 2, 1036, 240, 56, 'CLOSE', () => overlay.destroy(true), { fill: 0x263449, stroke: COLORS.cyan, size: 19 });
+    overlay.add(Object.values(close));
+  }
+
   exportEditorJson() {
     const project = this.serializeEditorProject();
     const text = JSON.stringify(project, null, 2);
@@ -1096,6 +1268,7 @@ class PegFanScene extends Phaser.Scene {
       this.editorRedo = [];
     }
     this.editorState.manualObjects = next;
+    this.editorState.selectedManualIndex = Phaser.Math.Clamp(this.editorState.selectedManualIndex ?? -1, -1, next.length - 1);
     saveEditorState(this.editorState);
     return true;
   }
@@ -1143,6 +1316,97 @@ class PegFanScene extends Phaser.Scene {
 
   setManualTool(tool) {
     this.editorState.manualTool = tool;
+    saveEditorState(this.editorState);
+    this.showStageEditor();
+  }
+
+  getManualObjectAt(point, radius = 34) {
+    const objects = this.editorState.manualObjects ?? [];
+    let bestIndex = -1;
+    let bestDistance = radius;
+    objects.forEach((object, index) => {
+      const center = this.objectCenter(object);
+      const distance = Math.hypot(center.x - point.x, center.y - point.y);
+      const allowance = object.kind === 'brick' || object.kind === 'rail' ? radius + 20 : radius + (object.r ?? 0) * 0.35;
+      if (distance <= allowance && distance < bestDistance + 20) {
+        bestIndex = index;
+        bestDistance = distance;
+      }
+    });
+    return bestIndex;
+  }
+
+  selectManualObject(index) {
+    this.editorState.selectedManualIndex = Phaser.Math.Clamp(index, -1, (this.editorState.manualObjects?.length ?? 0) - 1);
+    saveEditorState(this.editorState);
+    this.showStageEditor();
+  }
+
+  cycleManualSelection(dir = 1) {
+    const count = this.editorState.manualObjects?.length ?? 0;
+    if (!count) {
+      this.editorToast('NO OBJECTS');
+      return;
+    }
+    const current = this.editorState.selectedManualIndex ?? -1;
+    this.selectManualObject((current + dir + count) % count);
+  }
+
+  updateSelectedManualObject(updater) {
+    const index = this.editorState.selectedManualIndex ?? -1;
+    const objects = this.cloneManualObjects();
+    if (index < 0 || index >= objects.length) {
+      this.editorToast('SELECT OBJECT');
+      return;
+    }
+    objects[index] = updater(objects[index]);
+    this.setManualObjects(objects);
+    this.editorState.selectedManualIndex = index;
+    saveEditorState(this.editorState);
+    this.showStageEditor();
+  }
+
+  cycleSelectedManualType() {
+    const types = ['orange', 'blue', 'green', 'purple'];
+    this.updateSelectedManualObject((object) => {
+      if (object.kind !== 'peg' && object.kind !== 'brick') return object;
+      const current = types.indexOf(object.type ?? 'blue');
+      return { ...object, type: types[(current + 1 + types.length) % types.length] };
+    });
+  }
+
+  scaleManualVertices(object, factor) {
+    const center = this.objectCenter(object);
+    return {
+      ...object,
+      vertices: normalizeQuad(object).map((point) => ({
+        x: center.x + (point.x - center.x) * factor,
+        y: center.y + (point.y - center.y) * factor,
+      })),
+    };
+  }
+
+  adjustSelectedManualProperty(dir = 1) {
+    this.updateSelectedManualObject((object) => {
+      const factor = dir > 0 ? 1.08 : 0.92;
+      if (object.kind === 'brick' || object.kind === 'rail') return this.scaleManualVertices(object, factor);
+      if (object.kind === 'bumper') return { ...object, r: Phaser.Math.Clamp((object.r ?? 28) + dir * 4, 16, 70) };
+      if (object.kind === 'timed') return { ...object, w: Phaser.Math.Clamp((object.w ?? 140) + dir * 18, 60, 280) };
+      if (object.kind === 'spinner') return { ...object, radius: Phaser.Math.Clamp((object.radius ?? 48) + dir * 8, 28, 130) };
+      return object;
+    });
+  }
+
+  deleteSelectedManualObject() {
+    const index = this.editorState.selectedManualIndex ?? -1;
+    if (index < 0 || index >= (this.editorState.manualObjects?.length ?? 0)) {
+      this.editorToast('SELECT OBJECT');
+      return;
+    }
+    const objects = this.cloneManualObjects();
+    objects.splice(index, 1);
+    this.editorState.selectedManualIndex = Math.min(index, objects.length - 1);
+    this.setManualObjects(objects);
     saveEditorState(this.editorState);
     this.showStageEditor();
   }
@@ -1256,7 +1520,16 @@ class PegFanScene extends Phaser.Scene {
 
   handleManualPointerDown(pointer) {
     if (this.editorState.mode !== 'manual') return;
-    this.manualDragStart = this.snapEditorPoint(pointer);
+    const point = this.snapEditorPoint(pointer);
+    if (this.editorState.manualTool !== 'erase') {
+      const selected = this.getManualObjectAt(point);
+      if (selected >= 0) {
+        this.selectManualObject(selected);
+        this.manualDragStart = null;
+        return;
+      }
+    }
+    this.manualDragStart = point;
     this.manualDragLine?.destroy();
     this.manualDragLine = this.add.line(0, 0, this.manualDragStart.x, this.manualDragStart.y, this.manualDragStart.x, this.manualDragStart.y, COLORS.gold, 0.8)
       .setOrigin(0)
@@ -1514,6 +1787,26 @@ class PegFanScene extends Phaser.Scene {
       line.rotation = spinner.phase;
       this.add.circle(spinner.x, spinner.y, 10, 0xf8fafc, 0.3).setStrokeStyle(3, COLORS.gold).setDepth(4);
     });
+    if (this.editorState.mode === 'manual') {
+      const selected = this.editorState.manualObjects?.[this.editorState.selectedManualIndex];
+      if (selected) {
+        const center = this.objectCenter(selected);
+        const marker = this.add.graphics().setDepth(7);
+        marker.lineStyle(3, COLORS.gold, 0.98);
+        if (Array.isArray(selected.vertices)) {
+          const points = normalizeQuad(selected);
+          marker.beginPath();
+          marker.moveTo(points[0].x, points[0].y);
+          points.slice(1).forEach((point) => marker.lineTo(point.x, point.y));
+          marker.closePath();
+          marker.strokePath();
+        } else {
+          marker.strokeCircle(center.x, center.y, (selected.r ?? 22) + 12);
+        }
+        marker.lineStyle(2, COLORS.cyan, 0.8);
+        marker.strokeCircle(center.x, center.y, 5);
+      }
+    }
     this.add.text(78, 824, `OBJECTS ${level.pegs.length + level.bricks.length + level.rails.length + level.bumpers.length + level.timedBlocks.length + level.spinners.length}   ORANGE ${level.targetCount}`, {
       fontFamily: 'Verdana',
       fontSize: 20,
@@ -1521,7 +1814,8 @@ class PegFanScene extends Phaser.Scene {
       color: COLORS.text,
     }).setDepth(4);
     if (this.editorState.mode === 'manual') {
-      this.add.text(78, 858, 'CLICK: PLACE   DRAG: LINE   SNAP: GRID ASSIST   TOOL=ERASE: DELETE', {
+      const selected = this.editorState.selectedManualIndex >= 0 ? `   SELECTED #${this.editorState.selectedManualIndex + 1}` : '';
+      this.add.text(78, 858, `CLICK: SELECT/PLACE   DRAG: LINE   PROP: SIZE   TYPE: COLOR${selected}`, {
         fontFamily: 'Verdana',
         fontSize: 13,
         fontStyle: '700',
@@ -1542,7 +1836,7 @@ class PegFanScene extends Phaser.Scene {
   startLevel(levelNumber, levelOverride = null) {
     this.view = 'game';
     this.clearScene();
-    this.level = levelOverride ?? generateLevel(levelNumber);
+    this.level = levelOverride ?? this.getPlayableLevel(levelNumber);
     this.blockVisuals = [];
     this.shotsLeft = this.level.balls;
     this.score = 0;
@@ -1600,15 +1894,15 @@ class PegFanScene extends Phaser.Scene {
   }
 
   createGameUi() {
-    this.addPanel(288, 126, 500, 86, { fill: 0x0a1322, stroke: 0x2d3d58, accent: COLORS.gold, accentAlpha: 0.12 });
-    this.scoreText = this.add.text(58, 104, '', {
+    this.addPanel(252, 146, 428, 86, { fill: 0x0a1322, stroke: 0x2d3d58, accent: COLORS.gold, accentAlpha: 0.12 });
+    this.scoreText = this.add.text(58, 124, '', {
       fontFamily: 'Verdana',
       fontSize: 23,
       fontStyle: '700',
       color: COLORS.text,
       shadow: { offsetX: 0, offsetY: 2, color: '#000000', blur: 4, fill: true },
     });
-    this.goalText = this.add.text(58, 142, '', {
+    this.goalText = this.add.text(58, 162, '', {
       fontFamily: 'Meiryo, Verdana',
       fontSize: 19,
       color: COLORS.muted,
@@ -1808,8 +2102,8 @@ class PegFanScene extends Phaser.Scene {
   }
 
   refreshHud() {
-    this.scoreText.setText(`SCORE ${this.score}   BALL ${this.shotsLeft}   TARGET ${this.targetsLeft}`);
-    this.goalText.setText('オレンジペグをすべて消す');
+    this.scoreText.setText(`SCORE ${this.score}   BALL ${this.shotsLeft}`);
+    this.goalText.setText(`TARGET ${this.targetsLeft}`);
   }
 
   getPointerWorld(pointer = this.input.activePointer) {
@@ -2027,6 +2321,44 @@ class PegFanScene extends Phaser.Scene {
     });
   }
 
+  showComboBanner(combo) {
+    if (combo < 4 || combo % 2 !== 0) return;
+    const text = this.add.text(WIDTH / 2, 314, `${combo} HIT FEVER`, {
+      fontFamily: 'Verdana',
+      fontSize: 34,
+      fontStyle: '700',
+      color: '#ffd35a',
+      stroke: '#0b111b',
+      strokeThickness: 7,
+    }).setOrigin(0.5).setDepth(36).setScale(0.7);
+    this.tweens.add({
+      targets: text,
+      scale: 1.1,
+      y: 286,
+      alpha: 0,
+      duration: 760,
+      ease: 'Back.easeOut',
+      onComplete: () => text.destroy(),
+    });
+  }
+
+  pulseRemainingOrange() {
+    if (this.targetsLeft > 3 || this.orangeClearPending) return;
+    const targets = [
+      ...this.pegGroup.getChildren().filter((peg) => peg.active && peg.pegType === 'orange' && !peg.hit),
+      ...this.brickGroup.getChildren().filter((brick) => brick.active && brick.pegType === 'orange' && !brick.hit),
+    ];
+    targets.forEach((target) => {
+      this.tweens.add({
+        targets: target,
+        scale: { from: 1.18, to: 1 },
+        duration: 420,
+        ease: 'Sine.easeInOut',
+      });
+      this.burst(target.x, target.y, COLORS.orange);
+    });
+  }
+
   hitRail(ball, obstacle) {
     if (ball.body) this.setBodyVelocity(ball, ball.body.velocity.x * 1.02, ball.body.velocity.y * 1.02);
     this.playSfx('bumper', { volume: 0.42 });
@@ -2061,6 +2393,7 @@ class PegFanScene extends Phaser.Scene {
       volume: peg.pegType === 'orange' ? 0.74 : 0.58,
       rate: Phaser.Math.Clamp(0.92 + this.shotCombo * 0.045, 0.92, 1.45),
     });
+    this.showComboBanner(this.shotCombo);
     this.burst(peg.x, peg.y, peg.fillColor ?? COLORS.gold);
     this.popText(peg.x, peg.y - 20, this.shotCombo > 2 ? `+${gained} x${this.shotCombo}` : `+${gained}`, peg.pegType === 'orange' ? '#ffb088' : '#dbeafe');
     this.tweens.add({
@@ -2078,6 +2411,7 @@ class PegFanScene extends Phaser.Scene {
       this.spawnBall(ball.x, ball.y, -ball.body.velocity.x * 0.7, ball.body.velocity.y * 0.8);
     }
     this.refreshHud();
+    if (peg.pegType === 'orange') this.pulseRemainingOrange();
     if (this.targetsLeft <= 0) this.beginOrangeClear();
   }
 
@@ -2135,6 +2469,8 @@ class PegFanScene extends Phaser.Scene {
     this.orangeClearAnnounced = true;
     this.playSfx('clear', { volume: 0.86 });
     this.refreshHud();
+    const flash = this.add.rectangle(WIDTH / 2, HEIGHT / 2, WIDTH, HEIGHT, COLORS.gold, 0.18).setDepth(34);
+    this.tweens.add({ targets: flash, alpha: 0, duration: 420, onComplete: () => flash.destroy() });
     const banner = this.add.container(WIDTH / 2, 238).setDepth(35);
     banner.add(this.add.rectangle(0, 0, 520, 92, 0x141b2a, 0.88).setStrokeStyle(3, COLORS.gold, 0.95));
     banner.add(this.add.text(0, -18, 'ORANGE CLEAR', {
@@ -2461,3 +2797,4 @@ const game = new Phaser.Game({
 });
 
 window.pegFanGame = game;
+window.pegFanGenerateLevel = generateLevel;

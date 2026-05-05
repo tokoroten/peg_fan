@@ -1,0 +1,429 @@
+{
+  "level": 44,
+  "concept": "maze gates",
+  "balls": 9,
+  "targetCount": 13,
+  "pegs": [
+    {
+      "x": 110,
+      "y": 338,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 196,
+      "y": 338,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 282,
+      "y": 338,
+      "type": "orange",
+      "motion": null
+    },
+    {
+      "x": 368,
+      "y": 338,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 454,
+      "y": 338,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 712,
+      "y": 338,
+      "type": "orange",
+      "motion": null
+    },
+    {
+      "x": 798,
+      "y": 338,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 148,
+      "y": 405,
+      "type": "green",
+      "motion": null
+    },
+    {
+      "x": 234,
+      "y": 405,
+      "type": "orange",
+      "motion": null
+    },
+    {
+      "x": 492,
+      "y": 405,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 578,
+      "y": 405,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 664,
+      "y": 405,
+      "type": "orange",
+      "motion": null
+    },
+    {
+      "x": 750,
+      "y": 405,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 110,
+      "y": 472,
+      "type": "orange",
+      "motion": null
+    },
+    {
+      "x": 196,
+      "y": 472,
+      "type": "purple",
+      "motion": null
+    },
+    {
+      "x": 282,
+      "y": 472,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 540,
+      "y": 472,
+      "type": "orange",
+      "motion": null
+    },
+    {
+      "x": 626,
+      "y": 472,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 712,
+      "y": 472,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 798,
+      "y": 472,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 148,
+      "y": 539,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 234,
+      "y": 539,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 320,
+      "y": 539,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 406,
+      "y": 539,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 664,
+      "y": 539,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 750,
+      "y": 539,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 110,
+      "y": 606,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 196,
+      "y": 606,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 282,
+      "y": 606,
+      "type": "green",
+      "motion": null
+    },
+    {
+      "x": 368,
+      "y": 606,
+      "type": "orange",
+      "motion": null
+    },
+    {
+      "x": 454,
+      "y": 606,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 712,
+      "y": 606,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 798,
+      "y": 606,
+      "type": "orange",
+      "motion": null
+    },
+    {
+      "x": 148,
+      "y": 673,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 234,
+      "y": 673,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 492,
+      "y": 673,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 578,
+      "y": 673,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 664,
+      "y": 673,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 750,
+      "y": 673,
+      "type": "orange",
+      "motion": null
+    },
+    {
+      "x": 110,
+      "y": 740,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 196,
+      "y": 740,
+      "type": "orange",
+      "motion": null
+    },
+    {
+      "x": 282,
+      "y": 740,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 540,
+      "y": 740,
+      "type": "purple",
+      "motion": null
+    },
+    {
+      "x": 626,
+      "y": 740,
+      "type": "orange",
+      "motion": null
+    },
+    {
+      "x": 712,
+      "y": 740,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 798,
+      "y": 740,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 148,
+      "y": 807,
+      "type": "orange",
+      "motion": {
+        "axis": "y",
+        "amplitude": 30.32,
+        "speed": 0.7792,
+        "phase": 0
+      }
+    },
+    {
+      "x": 234,
+      "y": 807,
+      "type": "blue",
+      "motion": {
+        "axis": "x",
+        "amplitude": 37.32,
+        "speed": 0.7792,
+        "phase": 0.6981317007977318
+      }
+    },
+    {
+      "x": 320,
+      "y": 807,
+      "type": "blue",
+      "motion": {
+        "axis": "y",
+        "amplitude": 44.32,
+        "speed": 0.7792,
+        "phase": 1.3962634015954636
+      }
+    },
+    {
+      "x": 406,
+      "y": 807,
+      "type": "blue",
+      "motion": {
+        "axis": "x",
+        "amplitude": 30.32,
+        "speed": 0.7792,
+        "phase": 2.0943951023931953
+      }
+    },
+    {
+      "x": 664,
+      "y": 807,
+      "type": "blue",
+      "motion": {
+        "axis": "y",
+        "amplitude": 37.32,
+        "speed": 0.7792,
+        "phase": 2.792526803190927
+      }
+    },
+    {
+      "x": 750,
+      "y": 807,
+      "type": "green",
+      "motion": {
+        "axis": "x",
+        "amplitude": 44.32,
+        "speed": 0.7792,
+        "phase": 3.490658503988659
+      }
+    },
+    {
+      "x": 110,
+      "y": 874,
+      "type": "blue",
+      "motion": {
+        "axis": "y",
+        "amplitude": 30.32,
+        "speed": 0.7792,
+        "phase": 4.1887902047863905
+      }
+    },
+    {
+      "x": 196,
+      "y": 874,
+      "type": "blue",
+      "motion": {
+        "axis": "x",
+        "amplitude": 37.32,
+        "speed": 0.7792,
+        "phase": 4.886921905584122
+      }
+    },
+    {
+      "x": 282,
+      "y": 874,
+      "type": "blue",
+      "motion": {
+        "axis": "y",
+        "amplitude": 44.32,
+        "speed": 0.7792,
+        "phase": 5.585053606381854
+      }
+    },
+    {
+      "x": 368,
+      "y": 874,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 454,
+      "y": 874,
+      "type": "orange",
+      "motion": null
+    },
+    {
+      "x": 712,
+      "y": 874,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 798,
+      "y": 874,
+      "type": "blue",
+      "motion": null
+    }
+  ],
+  "bricks": [],
+  "rails": [
+    {
+      "x": 260,
+      "y": 660,
+      "w": 190,
+      "h": 13,
+      "angle": -0.52
+    },
+    {
+      "x": 640,
+      "y": 660,
+      "w": 190,
+      "h": 13,
+      "angle": 0.52
+    }
+  ],
+  "timedBlocks": [],
+  "spinners": [],
+  "bumpers": [],
+  "bucketSpeed": 240,
+  "rewardIndex": 2
+}
