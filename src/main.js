@@ -601,6 +601,7 @@ class PegFanScene extends Phaser.Scene {
     this.matterBodies = [];
     this.editorHistory = [];
     this.editorRedo = [];
+    this.currentCanvasWidth = WIDTH;
     this.input.setTopOnly(true);
     this.matter.world.setBounds(36, 0, WIDTH - 72, HEIGHT + 180, 64, true, true, true, false);
     this.matter.world.on('collisionstart', (event) => this.handleMatterCollision(event));
@@ -673,16 +674,25 @@ class PegFanScene extends Phaser.Scene {
     this.manualDragLine = null;
   }
 
+  setCanvasWidth(width) {
+    if (this.currentCanvasWidth === width) return;
+    this.currentCanvasWidth = width;
+    this.scale.resize(width, HEIGHT);
+    this.cameras.main.setViewport(0, 0, width, HEIGHT);
+    this.cameras.main.setSize(width, HEIGHT);
+  }
+
   addBackground(title = 'PEG FAN') {
+    const viewWidth = this.currentCanvasWidth ?? WIDTH;
     const g = this.add.graphics();
     g.fillGradientStyle(0x142033, 0x10243a, 0x07101d, 0x0b1020, 1);
-    g.fillRect(0, 0, SCREEN_WIDTH, HEIGHT);
+    g.fillRect(0, 0, viewWidth, HEIGHT);
     g.lineStyle(1, 0xffffff, 0.035);
-    for (let y = 128; y < HEIGHT; y += 72) g.lineBetween(42, y, SCREEN_WIDTH - 42, y + 28);
+    for (let y = 128; y < HEIGHT; y += 72) g.lineBetween(42, y, viewWidth - 42, y + 28);
     g.lineStyle(2, COLORS.gold, 0.16);
-    g.lineBetween(46, 112, SCREEN_WIDTH - 46, 112);
+    g.lineBetween(46, 112, viewWidth - 46, 112);
     g.lineStyle(2, COLORS.cyan, 0.11);
-    g.lineBetween(46, HEIGHT - 84, SCREEN_WIDTH - 46, HEIGHT - 84);
+    g.lineBetween(46, HEIGHT - 84, viewWidth - 46, HEIGHT - 84);
     for (let i = 0; i < 36; i += 1) {
       const x = 70 + ((i * 211) % 760);
       const y = 180 + ((i * 157) % 980);
@@ -784,6 +794,7 @@ class PegFanScene extends Phaser.Scene {
 
   showMenu() {
     this.view = 'menu';
+    this.setCanvasWidth(WIDTH);
     this.clearScene();
     this.addBackground('PEG FAN');
     this.addLabel(54, 122, '100 STAGE PEG PUZZLE', { family: 'Verdana', size: 22, color: '#ffd35a' });
@@ -867,6 +878,7 @@ class PegFanScene extends Phaser.Scene {
 
   showLevelSelect() {
     this.view = 'select';
+    this.setCanvasWidth(WIDTH);
     this.clearScene();
     this.addBackground('STAGE SELECT');
     this.button(756, 72, 190, 52, '戻る', () => this.showMenu(), { size: 20 });
@@ -890,6 +902,7 @@ class PegFanScene extends Phaser.Scene {
 
   showGallery() {
     this.view = 'gallery';
+    this.setCanvasWidth(WIDTH);
     this.clearScene();
     this.addBackground('GALLERY');
     this.button(756, 72, 190, 52, '戻る', () => this.showMenu(), { size: 20 });
@@ -949,6 +962,7 @@ class PegFanScene extends Phaser.Scene {
 
   showStageEditor() {
     this.view = 'editor';
+    this.setCanvasWidth(SCREEN_WIDTH);
     this.clearScene();
     this.editorState = clampEditorState(this.editorState ?? loadEditorState());
     this.addBackground('STAGE EDITOR');
@@ -2070,6 +2084,7 @@ class PegFanScene extends Phaser.Scene {
 
   startLevel(levelNumber, levelOverride = null) {
     this.view = 'game';
+    this.setCanvasWidth(WIDTH);
     this.clearScene();
     this.level = levelOverride ?? this.getPlayableLevel(levelNumber);
     this.blockVisuals = [];
@@ -3166,7 +3181,7 @@ class PegFanScene extends Phaser.Scene {
 const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: 'game',
-  width: SCREEN_WIDTH,
+  width: WIDTH,
   height: HEIGHT,
   backgroundColor: '#101521',
   physics: {
