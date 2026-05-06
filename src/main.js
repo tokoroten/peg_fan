@@ -141,6 +141,7 @@ function loadEditorState() {
     manualTool: 'peg',
     gridSnap: false,
     selectedManualIndex: -1,
+    selectedManualIndices: [],
     manualObjects: [],
   };
   try {
@@ -187,6 +188,9 @@ function clampEditorState(state) {
     manualTool: EDITOR_MANUAL_TOOLS.includes(state.manualTool) ? state.manualTool : 'peg',
     gridSnap: Boolean(state.gridSnap),
     selectedManualIndex: Phaser.Math.Clamp(Math.round(state.selectedManualIndex ?? -1), -1, Math.max(-1, (state.manualObjects?.length ?? 0) - 1)),
+    selectedManualIndices: Array.isArray(state.selectedManualIndices)
+      ? [...new Set(state.selectedManualIndices.map((index) => Math.round(index)).filter((index) => index >= 0 && index < (state.manualObjects?.length ?? 0)))]
+      : [],
     manualObjects: Array.isArray(state.manualObjects) ? state.manualObjects.slice(0, 240) : [],
   };
 }
@@ -254,7 +258,72 @@ function auditLevelData(level) {
     balls: level.balls,
     moving: (level.pegs ?? []).filter((peg) => peg.motion).length,
     hazards: (level.timedBlocks?.length ?? 0) + (level.spinners?.length ?? 0) + (level.rails?.length ?? 0),
+    quality: evaluateLevelDesign(level),
     flags,
+  };
+}
+
+function evaluateLevelDesign(level) {
+  const pegs = level.pegs ?? [];
+  const bricks = level.bricks ?? [];
+  const rails = level.rails ?? [];
+  const timedBlocks = level.timedBlocks ?? [];
+  const spinners = level.spinners ?? [];
+  const bumpers = level.bumpers ?? [];
+  const targetCount = level.targetCount ?? pegs.filter((peg) => peg.type === 'orange').length + bricks.filter((brick) => brick.type === 'orange').length;
+  const objects = pegs.length + bricks.length + rails.length + timedBlocks.length + spinners.length + bumpers.length;
+  const allCenters = [
+    ...pegs,
+    ...bricks.map((brick) => centerOfPoints(normalizeQuad(brick))),
+    ...rails.map((rail) => centerOfPoints(normalizeQuad(rail))),
+    ...timedBlocks,
+    ...spinners,
+    ...bumpers,
+  ];
+  const xs = allCenters.map((point) => point.x);
+  const ys = allCenters.map((point) => point.y);
+  const spreadX = xs.length ? Math.max(...xs) - Math.min(...xs) : 0;
+  const spreadY = ys.length ? Math.max(...ys) - Math.min(...ys) : 0;
+  const orangeRatio = objects ? targetCount / objects : 0;
+  const partKinds = [pegs.length, bricks.length, rails.length, timedBlocks.length, spinners.length, bumpers.length].filter(Boolean).length;
+  const gimmicks = rails.length + timedBlocks.length + spinners.length + bumpers.length;
+  const lowerObjects = allCenters.filter((point) => point.y > 770).length;
+  const middleObjects = allCenters.filter((point) => point.y >= 430 && point.y <= 900).length;
+
+  let score = 0;
+  score += Phaser.Math.Clamp(objects / 72, 0, 1) * 18;
+  score += Phaser.Math.Clamp(targetCount / 16, 0, 1) * 16;
+  score += Phaser.Math.Clamp(spreadX / 650, 0, 1) * 13;
+  score += Phaser.Math.Clamp(spreadY / 620, 0, 1) * 13;
+  score += Phaser.Math.Clamp(partKinds / 4, 0, 1) * 14;
+  score += Phaser.Math.Clamp(gimmicks / 10, 0, 1) * 12;
+  score += Phaser.Math.Clamp(middleObjects / 34, 0, 1) * 8;
+  score += Phaser.Math.Clamp(lowerObjects / 10, 0, 1) * 6;
+  if (orangeRatio < 0.08 || orangeRatio > 0.32) score -= 10;
+  if (objects < 28) score -= 18;
+  if (objects > 135) score -= 10;
+  if (targetCount < 4) score -= 14;
+  if (spreadY < 360) score -= 10;
+  score = Phaser.Math.Clamp(Math.round(score), 0, 100);
+  const grade = score >= 86 ? 'S' : score >= 74 ? 'A' : score >= 62 ? 'B' : score >= 48 ? 'C' : 'D';
+  const advice = [];
+  if (objects < 40) advice.push('ADD_DENSITY');
+  if (spreadY < 450) advice.push('USE_DEPTH');
+  if (spreadX < 520) advice.push('WIDEN_ROUTE');
+  if (targetCount < 8) advice.push('MORE_ORANGE');
+  if (gimmicks < 4) advice.push('ADD_GIMMICK');
+  if (orangeRatio > 0.32) advice.push('TOO_ORANGE');
+  return {
+    score,
+    grade,
+    objects,
+    targetCount,
+    spreadX: Math.round(spreadX),
+    spreadY: Math.round(spreadY),
+    orangeRatio: Number(orangeRatio.toFixed(2)),
+    partKinds,
+    gimmicks,
+    advice,
   };
 }
 
@@ -608,6 +677,7 @@ class PegFanScene extends Phaser.Scene {
     this.input.keyboard?.on('keydown-SPACE', () => this.launchBall());
     this.input.keyboard?.on('keydown-ESC', () => this.showMenu());
     this.input.keyboard?.on('keydown-Z', (event) => this.handleEditorUndoShortcut(event));
+    this.input.keyboard?.on('keydown', (event) => this.handleEditorKeyboardShortcut(event));
     this.showMenu();
   }
 
@@ -672,6 +742,10 @@ class PegFanScene extends Phaser.Scene {
     this.trajectory = null;
     this.manualDragStart = null;
     this.manualDragLine = null;
+    this.manualMoveStart = null;
+    this.manualMoveOriginal = null;
+    this.manualSelectStart = null;
+    this.manualSelectionRect = null;
   }
 
   setCanvasWidth(width) {
@@ -1263,6 +1337,7 @@ class PegFanScene extends Phaser.Scene {
         mode: 'manual',
         manualObjects: this.levelToManualObjects(level),
         selectedManualIndex: -1,
+        selectedManualIndices: [],
         balls: level.balls,
       },
       level,
@@ -1309,6 +1384,7 @@ class PegFanScene extends Phaser.Scene {
     const flagged = audits.filter((audit) => audit.flags.length);
     const avgTargets = audits.reduce((sum, audit) => sum + audit.targetCount, 0) / audits.length;
     const avgObjects = audits.reduce((sum, audit) => sum + audit.objects, 0) / audits.length;
+    const avgQuality = audits.reduce((sum, audit) => sum + audit.quality.score, 0) / audits.length;
     const qaRuns = audits.reduce((sum, audit) => sum + (audit.qa?.attempts ?? 0), 0);
     const overlay = this.add.container(0, 0).setDepth(80);
     overlay.add(this.add.rectangle(WIDTH / 2, HEIGHT / 2, 760, 850, 0x0b111b, 0.97).setStrokeStyle(2, COLORS.cyan));
@@ -1318,13 +1394,13 @@ class PegFanScene extends Phaser.Scene {
       fontStyle: '700',
       color: '#34d3e5',
     }).setOrigin(0.5));
-    overlay.add(this.add.text(WIDTH / 2, 328, `AVG OBJECTS ${avgObjects.toFixed(1)}   AVG ORANGE ${avgTargets.toFixed(1)}   FLAGGED ${flagged.length}   QA ${qaRuns}`, {
+    overlay.add(this.add.text(WIDTH / 2, 328, `AVG Q ${avgQuality.toFixed(0)}   AVG OBJECTS ${avgObjects.toFixed(1)}   AVG ORANGE ${avgTargets.toFixed(1)}   FLAGGED ${flagged.length}   QA ${qaRuns}`, {
       fontFamily: 'Verdana',
       fontSize: 20,
       color: COLORS.text,
     }).setOrigin(0.5));
     const lines = (flagged.length ? flagged : audits.slice(0, 12)).slice(0, 18).map((audit) => (
-      `L${String(audit.level).padStart(3, '0')} ${audit.concept}  OBJ ${audit.objects}  ORG ${audit.targetCount}  BALL ${audit.balls}  ${audit.qa ? `QA ${audit.qa.clears}/${audit.qa.attempts}` : 'QA -'}  ${audit.flags.join(',') || 'OK'}`
+      `L${String(audit.level).padStart(3, '0')} ${audit.concept}  Q ${audit.quality.grade}${String(audit.quality.score).padStart(3, ' ')}  OBJ ${audit.objects}  ORG ${audit.targetCount}  BALL ${audit.balls}  ${audit.qa ? `QA ${audit.qa.clears}/${audit.qa.attempts}` : 'QA -'}  ${audit.flags.join(',') || audit.quality.advice.slice(0, 2).join(',') || 'OK'}`
     ));
     overlay.add(this.add.text(110, 386, lines.join('\n'), {
       fontFamily: 'Consolas, Verdana',
@@ -1450,6 +1526,20 @@ class PegFanScene extends Phaser.Scene {
     return JSON.stringify(a) === JSON.stringify(b);
   }
 
+  normalizeManualSelection(indices = this.editorState?.selectedManualIndices ?? []) {
+    const count = this.editorState?.manualObjects?.length ?? 0;
+    const primary = this.editorState?.selectedManualIndex ?? -1;
+    const usePrimaryFallback = arguments.length === 0 && !indices.length && primary >= 0;
+    const merged = usePrimaryFallback ? [primary] : indices;
+    return [...new Set(merged.map((index) => Math.round(index)).filter((index) => index >= 0 && index < count))].sort((a, b) => a - b);
+  }
+
+  syncManualSelection(indices = this.editorState?.selectedManualIndices ?? []) {
+    const selected = this.normalizeManualSelection(indices);
+    this.editorState.selectedManualIndices = selected;
+    this.editorState.selectedManualIndex = selected.length ? selected[selected.length - 1] : -1;
+  }
+
   setManualObjects(nextObjects, { record = true } = {}) {
     const current = this.cloneManualObjects();
     const next = this.cloneManualObjects(nextObjects).slice(-240);
@@ -1459,7 +1549,7 @@ class PegFanScene extends Phaser.Scene {
       this.editorRedo = [];
     }
     this.editorState.manualObjects = next;
-    this.editorState.selectedManualIndex = Phaser.Math.Clamp(this.editorState.selectedManualIndex ?? -1, -1, next.length - 1);
+    this.syncManualSelection(this.editorState.selectedManualIndices);
     saveEditorState(this.editorState);
     return true;
   }
@@ -1499,6 +1589,27 @@ class PegFanScene extends Phaser.Scene {
     else this.undoEditorHistory();
   }
 
+  handleEditorKeyboardShortcut(event) {
+    const key = String(event?.key ?? '').toLowerCase();
+    const isModifier = event?.ctrlKey || event?.metaKey;
+    if (!isModifier || this.view !== 'editor' || this.editorState?.mode !== 'manual') return;
+    if (key === 'z') return;
+    if (key === 'c') {
+      event?.preventDefault?.();
+      this.copyManualSelection();
+    } else if (key === 'v') {
+      event?.preventDefault?.();
+      this.pasteManualSelection();
+    } else if (key === 'a') {
+      event?.preventDefault?.();
+      this.selectAllManualObjects();
+    } else if (key === 'd') {
+      event?.preventDefault?.();
+      this.copyManualSelection();
+      this.pasteManualSelection();
+    }
+  }
+
   setManualType(type) {
     this.editorState.type = type;
     saveEditorState(this.editorState);
@@ -1527,8 +1638,18 @@ class PegFanScene extends Phaser.Scene {
     return bestIndex;
   }
 
-  selectManualObject(index) {
-    this.editorState.selectedManualIndex = Phaser.Math.Clamp(index, -1, (this.editorState.manualObjects?.length ?? 0) - 1);
+  selectManualObject(index, additive = false) {
+    const count = this.editorState.manualObjects?.length ?? 0;
+    const safeIndex = Phaser.Math.Clamp(index, -1, count - 1);
+    if (safeIndex < 0) {
+      this.syncManualSelection([]);
+    } else if (additive) {
+      const current = this.normalizeManualSelection();
+      const next = current.includes(safeIndex) ? current.filter((item) => item !== safeIndex) : [...current, safeIndex];
+      this.syncManualSelection(next);
+    } else {
+      this.syncManualSelection([safeIndex]);
+    }
     saveEditorState(this.editorState);
     this.showStageEditor();
   }
@@ -1588,13 +1709,27 @@ class PegFanScene extends Phaser.Scene {
     });
   }
 
+  translateManualObject(object, dx, dy) {
+    if (Array.isArray(object.vertices)) {
+      return { ...object, vertices: normalizeQuad(object).map((point) => ({ x: point.x + dx, y: point.y + dy })) };
+    }
+    return { ...object, x: object.x + dx, y: object.y + dy };
+  }
+
   moveSelectedManualObject(dx, dy) {
-    this.updateSelectedManualObject((object) => {
-      if (Array.isArray(object.vertices)) {
-        return { ...object, vertices: normalizeQuad(object).map((point) => ({ x: point.x + dx, y: point.y + dy })) };
-      }
-      return { ...object, x: object.x + dx, y: object.y + dy };
+    const selected = this.normalizeManualSelection();
+    if (!selected.length) {
+      this.editorToast('SELECT OBJECT');
+      return;
+    }
+    const objects = this.cloneManualObjects();
+    selected.forEach((index) => {
+      objects[index] = this.translateManualObject(objects[index], dx, dy);
     });
+    this.setManualObjects(objects);
+    this.syncManualSelection(selected);
+    saveEditorState(this.editorState);
+    this.showStageEditor();
   }
 
   rotateSelectedManualObject(dir = 1) {
@@ -1609,7 +1744,9 @@ class PegFanScene extends Phaser.Scene {
   }
 
   selectedManualSummary(object) {
-    if (!object) return ['NO SELECTION', 'Click an object or use SEL+'];
+    const selectedCount = this.normalizeManualSelection().length;
+    if (selectedCount > 1) return [`${selectedCount} OBJECTS SELECTED`, 'Drag group / copy / paste / delete'];
+    if (!object) return ['NO SELECTION', 'Click, Shift+click, or Shift+drag'];
     const center = this.objectCenter(object);
     const base = [`${object.kind.toUpperCase()}  X ${Math.round(center.x)}  Y ${Math.round(center.y)}`];
     if (object.kind === 'peg' || object.kind === 'brick') base.push(`TYPE ${(object.type ?? 'blue').toUpperCase()}`);
@@ -1643,18 +1780,75 @@ class PegFanScene extends Phaser.Scene {
     this.button(1142, 1228, 76, 34, 'TYPE', () => this.cycleSelectedManualType(), { size: 11, fill: 0x1f3a5f, stroke: COLORS.blue, depth: 10 });
     this.button(1010, 1270, 96, 34, 'SIZE-', () => this.adjustSelectedManualProperty(-1), { size: 11, fill: 0x4a3d21, stroke: COLORS.gold, depth: 10 });
     this.button(1122, 1270, 96, 34, 'SIZE+', () => this.adjustSelectedManualProperty(1), { size: 11, fill: 0x4a3d21, stroke: COLORS.gold, depth: 10 });
+    this.button(1226, 1184, 62, 34, 'COPY', () => this.copyManualSelection(), { size: 10, fill: 0x334155, stroke: COLORS.cyan, depth: 10 });
+    this.button(1226, 1228, 62, 34, 'PASTE', () => this.pasteManualSelection(), { size: 10, fill: 0x334155, stroke: COLORS.cyan, depth: 10 });
+  }
+
+  renderEditorQualityPanel(level) {
+    const quality = evaluateLevelDesign(level);
+    const color = quality.score >= 74 ? COLORS.green : quality.score >= 58 ? COLORS.gold : COLORS.red;
+    this.add.rectangle(664, 330, 310, 112, 0x07101d, 0.82).setStrokeStyle(2, color, 0.72).setDepth(5);
+    this.add.text(526, 286, 'QUALITY', {
+      fontFamily: 'Verdana',
+      fontSize: 15,
+      fontStyle: '700',
+      color: '#93c5fd',
+    }).setDepth(6);
+    this.add.text(526, 312, `${quality.grade}  ${quality.score}/100`, {
+      fontFamily: 'Verdana',
+      fontSize: 28,
+      fontStyle: '700',
+      color: quality.score >= 74 ? '#86efac' : quality.score >= 58 ? '#ffd35a' : '#ff8aa2',
+    }).setDepth(6);
+    const advice = quality.advice.length ? quality.advice.slice(0, 3).join(' / ') : 'READY FOR TEST';
+    this.add.text(526, 354, `SPREAD ${quality.spreadX}x${quality.spreadY}  GIMMICK ${quality.gimmicks}\n${advice}`, {
+      fontFamily: 'Consolas, Verdana',
+      fontSize: 12,
+      lineSpacing: 4,
+      color: COLORS.muted,
+    }).setDepth(6);
   }
 
   deleteSelectedManualObject() {
-    const index = this.editorState.selectedManualIndex ?? -1;
-    if (index < 0 || index >= (this.editorState.manualObjects?.length ?? 0)) {
+    const selected = this.normalizeManualSelection();
+    if (!selected.length) {
       this.editorToast('SELECT OBJECT');
       return;
     }
-    const objects = this.cloneManualObjects();
-    objects.splice(index, 1);
-    this.editorState.selectedManualIndex = Math.min(index, objects.length - 1);
+    const remove = new Set(selected);
+    const objects = this.cloneManualObjects().filter((_, index) => !remove.has(index));
+    this.syncManualSelection([]);
     this.setManualObjects(objects);
+    saveEditorState(this.editorState);
+    this.showStageEditor();
+  }
+
+  copyManualSelection() {
+    const selected = this.normalizeManualSelection();
+    if (!selected.length) {
+      this.editorToast('SELECT OBJECT');
+      return;
+    }
+    this.manualClipboard = selected.map((index) => clonePlain(this.editorState.manualObjects[index]));
+    this.editorToast(`COPIED ${this.manualClipboard.length}`);
+  }
+
+  pasteManualSelection() {
+    if (!this.manualClipboard?.length) {
+      this.editorToast('CLIPBOARD EMPTY');
+      return;
+    }
+    const pasted = this.manualClipboard.map((object) => this.translateManualObject(clonePlain(object), 26, 26));
+    const next = [...this.editorState.manualObjects, ...pasted].slice(-240);
+    const keptStart = Math.max(0, next.length - pasted.length);
+    this.setManualObjects(next);
+    this.syncManualSelection(Array.from({ length: pasted.length }, (_, offset) => keptStart + offset));
+    saveEditorState(this.editorState);
+    this.showStageEditor();
+  }
+
+  selectAllManualObjects() {
+    this.syncManualSelection(this.editorState.manualObjects.map((_, index) => index));
     saveEditorState(this.editorState);
     this.showStageEditor();
   }
@@ -1766,16 +1960,60 @@ class PegFanScene extends Phaser.Scene {
     )));
   }
 
+  manualObjectsInRect(start, end) {
+    const left = Math.min(start.x, end.x);
+    const right = Math.max(start.x, end.x);
+    const top = Math.min(start.y, end.y);
+    const bottom = Math.max(start.y, end.y);
+    return (this.editorState.manualObjects ?? [])
+      .map((object, index) => ({ index, center: this.objectCenter(object) }))
+      .filter(({ center }) => center.x >= left && center.x <= right && center.y >= top && center.y <= bottom)
+      .map(({ index }) => index);
+  }
+
+  applyManualGroupMove(dx, dy) {
+    const selected = this.normalizeManualSelection();
+    if (!selected.length || (Math.abs(dx) < 1 && Math.abs(dy) < 1)) return false;
+    const objects = this.cloneManualObjects(this.manualMoveOriginal ?? this.editorState.manualObjects);
+    selected.forEach((index) => {
+      objects[index] = this.translateManualObject(objects[index], dx, dy);
+    });
+    this.setManualObjects(objects);
+    this.syncManualSelection(selected);
+    saveEditorState(this.editorState);
+    return true;
+  }
+
   handleManualPointerDown(pointer) {
     if (this.editorState.mode !== 'manual') return;
     const point = this.snapEditorPoint(pointer);
+    const additive = pointer.shiftKey;
     if (this.editorState.manualTool !== 'erase') {
       const selected = this.getManualObjectAt(point);
       if (selected >= 0) {
-        this.selectManualObject(selected);
+        if (additive) {
+          this.selectManualObject(selected, true);
+          this.manualDragStart = null;
+          return;
+        }
+        if (!this.normalizeManualSelection().includes(selected)) {
+          this.syncManualSelection([selected]);
+          saveEditorState(this.editorState);
+        }
+        this.manualMoveStart = point;
+        this.manualMoveOriginal = this.cloneManualObjects();
         this.manualDragStart = null;
         return;
       }
+    }
+    if (additive) {
+      this.manualSelectStart = point;
+      this.manualSelectionRect?.destroy();
+      this.manualSelectionRect = this.add.rectangle(point.x, point.y, 1, 1, COLORS.cyan, 0.08)
+        .setStrokeStyle(2, COLORS.cyan, 0.7)
+        .setOrigin(0)
+        .setDepth(8);
+      return;
     }
     this.manualDragStart = point;
     this.manualDragLine?.destroy();
@@ -1786,13 +2024,50 @@ class PegFanScene extends Phaser.Scene {
   }
 
   handleManualPointerMove(pointer) {
-    if (!this.manualDragStart || this.editorState.mode !== 'manual') return;
+    if (this.editorState.mode !== 'manual') return;
     const point = this.snapEditorPoint(pointer);
+    if (this.manualMoveStart) return;
+    if (this.manualSelectStart) {
+      const x = Math.min(this.manualSelectStart.x, point.x);
+      const y = Math.min(this.manualSelectStart.y, point.y);
+      this.manualSelectionRect?.setPosition(x, y);
+      this.manualSelectionRect?.setSize(Math.abs(point.x - this.manualSelectStart.x), Math.abs(point.y - this.manualSelectStart.y));
+      return;
+    }
+    if (!this.manualDragStart) return;
     this.manualDragLine?.setTo(this.manualDragStart.x, this.manualDragStart.y, point.x, point.y);
   }
 
   handleManualPointerUp(pointer) {
-    if (!this.manualDragStart || this.editorState.mode !== 'manual') return;
+    if (this.editorState.mode !== 'manual') return;
+    if (this.manualMoveStart) {
+      const end = this.snapEditorPoint(pointer);
+      const dx = end.x - this.manualMoveStart.x;
+      const dy = end.y - this.manualMoveStart.y;
+      this.manualMoveStart = null;
+      if (Math.hypot(dx, dy) > 4) {
+        this.applyManualGroupMove(dx, dy);
+        this.manualMoveOriginal = null;
+        this.showStageEditor();
+      } else {
+        this.manualMoveOriginal = null;
+        this.showStageEditor();
+      }
+      return;
+    }
+    if (this.manualSelectStart) {
+      const start = this.manualSelectStart;
+      const end = this.snapEditorPoint(pointer);
+      this.manualSelectStart = null;
+      this.manualSelectionRect?.destroy();
+      this.manualSelectionRect = null;
+      const selected = Math.hypot(end.x - start.x, end.y - start.y) > 6 ? this.manualObjectsInRect(start, end) : [];
+      this.syncManualSelection(selected);
+      saveEditorState(this.editorState);
+      this.showStageEditor();
+      return;
+    }
+    if (!this.manualDragStart) return;
     const start = this.manualDragStart;
     const end = this.snapEditorPoint(pointer);
     this.manualDragStart = null;
@@ -2036,24 +2311,27 @@ class PegFanScene extends Phaser.Scene {
       this.add.circle(spinner.x, spinner.y, 10, 0xf8fafc, 0.3).setStrokeStyle(3, COLORS.gold).setDepth(4);
     });
     if (this.editorState.mode === 'manual') {
+      const selectedIndices = this.normalizeManualSelection();
       const selected = this.editorState.manualObjects?.[this.editorState.selectedManualIndex];
-      if (selected) {
-        const center = this.objectCenter(selected);
+      selectedIndices.forEach((index) => {
+        const selectedObject = this.editorState.manualObjects?.[index];
+        if (!selectedObject) return;
+        const center = this.objectCenter(selectedObject);
         const marker = this.add.graphics().setDepth(7);
         marker.lineStyle(3, COLORS.gold, 0.98);
-        if (Array.isArray(selected.vertices)) {
-          const points = normalizeQuad(selected);
+        if (Array.isArray(selectedObject.vertices)) {
+          const points = normalizeQuad(selectedObject);
           marker.beginPath();
           marker.moveTo(points[0].x, points[0].y);
           points.slice(1).forEach((point) => marker.lineTo(point.x, point.y));
           marker.closePath();
           marker.strokePath();
         } else {
-          marker.strokeCircle(center.x, center.y, (selected.r ?? 22) + 12);
+          marker.strokeCircle(center.x, center.y, (selectedObject.r ?? 22) + 12);
         }
         marker.lineStyle(2, COLORS.cyan, 0.8);
         marker.strokeCircle(center.x, center.y, 5);
-      }
+      });
       this.renderSelectedPropertyPanel(selected);
     }
     this.add.text(78, 282, `OBJECTS ${level.pegs.length + level.bricks.length + level.rails.length + level.bumpers.length + level.timedBlocks.length + level.spinners.length}   ORANGE ${level.targetCount}`, {
@@ -2062,9 +2340,11 @@ class PegFanScene extends Phaser.Scene {
       fontStyle: '700',
       color: COLORS.text,
     }).setDepth(4);
+    this.renderEditorQualityPanel(level);
     if (this.editorState.mode === 'manual') {
-      const selected = this.editorState.selectedManualIndex >= 0 ? `   SELECTED #${this.editorState.selectedManualIndex + 1}` : '';
-      this.add.text(78, 1150, `CLICK: SELECT/PLACE   DRAG: LINE   PROP: SIZE   TYPE: COLOR${selected}`, {
+      const selectedCount = this.normalizeManualSelection().length;
+      const selected = selectedCount ? `   SELECTED ${selectedCount}` : '';
+      this.add.text(78, 1150, `CLICK: SELECT/DRAG MOVE   SHIFT: MULTI/RANGE   CTRL+C/V/A/D   DRAG EMPTY: LINE${selected}`, {
         fontFamily: 'Verdana',
         fontSize: 13,
         fontStyle: '700',
@@ -3200,3 +3480,4 @@ const game = new Phaser.Game({
 
 window.pegFanGame = game;
 window.pegFanGenerateLevel = generateLevel;
+window.pegFanEvaluateLevel = evaluateLevelDesign;
