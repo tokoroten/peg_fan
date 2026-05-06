@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import './styles.css';
 
 const WIDTH = 900;
+const SCREEN_WIDTH = 1280;
 const HEIGHT = 1300;
 const TOTAL_LEVELS = 100;
 const REWARD_COUNT = 100;
@@ -675,13 +676,13 @@ class PegFanScene extends Phaser.Scene {
   addBackground(title = 'PEG FAN') {
     const g = this.add.graphics();
     g.fillGradientStyle(0x142033, 0x10243a, 0x07101d, 0x0b1020, 1);
-    g.fillRect(0, 0, WIDTH, HEIGHT);
+    g.fillRect(0, 0, SCREEN_WIDTH, HEIGHT);
     g.lineStyle(1, 0xffffff, 0.035);
-    for (let y = 128; y < HEIGHT; y += 72) g.lineBetween(42, y, WIDTH - 42, y + 28);
+    for (let y = 128; y < HEIGHT; y += 72) g.lineBetween(42, y, SCREEN_WIDTH - 42, y + 28);
     g.lineStyle(2, COLORS.gold, 0.16);
-    g.lineBetween(46, 112, WIDTH - 46, 112);
+    g.lineBetween(46, 112, SCREEN_WIDTH - 46, 112);
     g.lineStyle(2, COLORS.cyan, 0.11);
-    g.lineBetween(46, HEIGHT - 84, WIDTH - 46, HEIGHT - 84);
+    g.lineBetween(46, HEIGHT - 84, SCREEN_WIDTH - 46, HEIGHT - 84);
     for (let i = 0; i < 36; i += 1) {
       const x = 70 + ((i * 211) % 760);
       const y = 180 + ((i * 157) % 980);
@@ -951,7 +952,7 @@ class PegFanScene extends Phaser.Scene {
     this.clearScene();
     this.editorState = clampEditorState(this.editorState ?? loadEditorState());
     this.addBackground('STAGE EDITOR');
-    this.button(756, 72, 190, 52, '戻る', () => this.showMenu(), { size: 20 });
+    this.button(1166, 72, 180, 52, '戻る', () => this.showMenu(), { size: 20 });
 
     const header = this.editorState.mode === 'manual'
       ? 'MANUAL LAYOUT BUILDER'
@@ -971,7 +972,7 @@ class PegFanScene extends Phaser.Scene {
     this.addLabel(54, 154, description, {
       size: 17,
       color: COLORS.muted,
-      wordWrap: { width: 760 },
+      wordWrap: { width: 820 },
       style: '600',
     });
 
@@ -1011,51 +1012,53 @@ class PegFanScene extends Phaser.Scene {
     const randomLabel = state.mode === 'manual' ? 'CLEAR' : 'RANDOM';
     const randomAction = () => (state.mode === 'manual' ? this.clearManualEditor() : this.randomizeEditor());
 
-    this.addPanel(450, 1035, 812, 232, { fill: 0x0f1828, stroke: 0x334155, accent: COLORS.cyan, accentAlpha: 0.16 });
+    const panelX = 1082;
+    const leftX = 944;
+    const rightX = 1086;
+    const thirdX = 1228;
+    this.addPanel(panelX, 656, 344, 1050, { fill: 0x0f1828, stroke: 0x334155, accent: COLORS.cyan, accentAlpha: 0.16 });
+    this.addLabel(930, 160, 'WORKFLOW', { family: 'Verdana', size: 22, color: '#ffd35a', shadow: false });
     if (state.mode === 'concept') {
-      this.addStatPill(200, 936, 260, 'CONCEPT', EDITOR_CONCEPTS[state.conceptIndex].label, COLORS.cyan);
-      this.addStatPill(460, 936, 180, 'VARIANT', `${state.conceptAct + 1} / 10`, COLORS.gold);
-      this.addStatPill(660, 936, 170, 'SOURCE', `L${this.conceptLevelNumber()}`, COLORS.green);
+      this.addStatPill(panelX, 220, 300, 'CONCEPT', EDITOR_CONCEPTS[state.conceptIndex].label, COLORS.cyan);
+      this.addStatPill(panelX, 292, 300, 'VARIANT', `${state.conceptAct + 1} / 10`, COLORS.gold);
+      this.addStatPill(panelX, 364, 300, 'SOURCE', `L${this.conceptLevelNumber()}`, COLORS.green);
     } else {
-      this.addStatPill(166, 936, 190, state.mode === 'manual' ? 'MODE' : 'SHAPE', state.mode === 'manual' ? this.titleCase(state.mode) : this.titleCase(state.shape), COLORS.cyan);
-      this.addStatPill(386, 936, 190, state.mode === 'manual' ? 'TOOL' : 'PART', state.mode === 'manual' ? this.titleCase(state.manualTool) : this.titleCase(state.part), COLORS.gold);
-      this.addStatPill(606, 936, 190, 'TYPE', this.titleCase(state.type), this.colorForType(state.type));
+      this.addStatPill(panelX, 220, 300, state.mode === 'manual' ? 'MODE' : 'SHAPE', state.mode === 'manual' ? this.titleCase(state.mode) : this.titleCase(state.shape), COLORS.cyan);
+      this.addStatPill(panelX, 292, 300, state.mode === 'manual' ? 'TOOL' : 'PART', state.mode === 'manual' ? this.titleCase(state.manualTool) : this.titleCase(state.part), COLORS.gold);
+      this.addStatPill(panelX, 364, 300, 'TYPE', this.titleCase(state.type), this.colorForType(state.type));
     }
 
-    this.button(88, 1000, 86, 44, 'MODE', () => cycle('mode', EDITOR_MODES), { size: 14, fill: state.mode === 'manual' ? 0x6b4b18 : 0x1f3a5f, stroke: state.mode === 'manual' ? COLORS.gold : 0x45526a });
-    this.button(190, 1000, 86, 44, secondaryLabel, secondaryAction, { size: state.mode === 'concept' ? 11 : 14, fill: 0x1f3a5f });
-    this.button(292, 1000, 86, 44, tertiaryLabel, tertiaryAction, { size: state.mode === 'concept' ? 11 : 14, fill: state.mode === 'manual' && state.gridSnap ? 0x6b4b18 : 0x1f3a5f, stroke: state.mode === 'manual' && state.gridSnap ? COLORS.gold : 0x45526a });
-    this.button(394, 1000, 86, 44, quaternaryLabel, quaternaryAction, { size: 14, fill: state.mode === 'concept' ? 0x4a3d21 : 0x1f3a5f, stroke: state.mode === 'concept' ? COLORS.gold : 0x45526a });
-    this.button(508, 1000, 118, 44, randomLabel, randomAction, { size: 14, fill: 0x3f2f56, stroke: 0xc084fc });
-    this.button(686, 1000, 200, 44, 'TEST PLAY', () => this.startEditorTest(), { size: 17, fill: 0x2c6f84, stroke: 0x5eead4, primary: true });
+    this.addLabel(930, 430, 'TOOLS', { family: 'Verdana', size: 18, color: '#93c5fd', shadow: false });
+    this.button(leftX, 478, 118, 42, 'MODE', () => cycle('mode', EDITOR_MODES), { size: 14, fill: state.mode === 'manual' ? 0x6b4b18 : 0x1f3a5f, stroke: state.mode === 'manual' ? COLORS.gold : 0x45526a });
+    this.button(rightX, 478, 118, 42, secondaryLabel, secondaryAction, { size: state.mode === 'concept' ? 11 : 14, fill: 0x1f3a5f });
+    this.button(thirdX, 478, 86, 42, tertiaryLabel, tertiaryAction, { size: state.mode === 'concept' ? 10 : 13, fill: state.mode === 'manual' && state.gridSnap ? 0x6b4b18 : 0x1f3a5f, stroke: state.mode === 'manual' && state.gridSnap ? COLORS.gold : 0x45526a });
+    this.button(leftX, 530, 118, 42, quaternaryLabel, quaternaryAction, { size: 13, fill: state.mode === 'concept' ? 0x4a3d21 : 0x1f3a5f, stroke: state.mode === 'concept' ? COLORS.gold : 0x45526a });
+    this.button(rightX, 530, 118, 42, randomLabel, randomAction, { size: 13, fill: 0x3f2f56, stroke: 0xc084fc });
+    this.button(thirdX, 530, 86, 42, state.mode === 'manual' ? 'UNDO' : state.mode === 'concept' ? '-C' : '-8', () => (state.mode === 'manual' ? this.undoEditorHistory() : state.mode === 'concept' ? adjustConcept('conceptIndex', -1) : adjust('count', -8)), { size: 12 });
 
-    this.addLabel(78, 1052, state.mode === 'manual' ? `MODE ${this.titleCase(state.mode)}` : state.mode === 'concept' ? `CONCEPT ${state.conceptIndex + 1}` : `COUNT ${state.count}`, { family: 'Verdana', size: 16, color: COLORS.text, shadow: false });
-    this.addLabel(258, 1052, state.mode === 'manual' ? `TOOL ${this.titleCase(state.manualTool)}` : state.mode === 'concept' ? `VARIANT ${state.conceptAct + 1}` : `RADIUS ${state.radius}`, { family: 'Verdana', size: 16, color: COLORS.text, shadow: false });
-    this.addLabel(458, 1052, state.mode === 'manual' ? `SNAP ${state.gridSnap ? 'ON' : 'OFF'}` : state.mode === 'concept' ? 'BAKE TO MANUAL' : `TURNS ${state.turns}`, { family: 'Verdana', size: 16, color: COLORS.text, shadow: false });
-    this.addLabel(638, 1052, `BALLS ${state.balls}`, { family: 'Verdana', size: 16, color: COLORS.text, shadow: false });
+    this.button(leftX, 590, 118, 42, state.mode === 'manual' ? 'SEL-' : state.mode === 'concept' ? '+C' : '+8', () => (state.mode === 'manual' ? this.cycleManualSelection(-1) : state.mode === 'concept' ? adjustConcept('conceptIndex', 1) : adjust('count', 8)), { size: 13 });
+    this.button(rightX, 590, 118, 42, state.mode === 'manual' ? 'SEL+' : state.mode === 'concept' ? '-V' : '-20', () => (state.mode === 'manual' ? this.cycleManualSelection(1) : state.mode === 'concept' ? adjustConcept('conceptAct', -1) : adjust('radius', -20)), { size: 13 });
+    this.button(thirdX, 590, 86, 42, state.mode === 'manual' ? 'DEL' : '+1', () => (state.mode === 'manual' ? this.deleteSelectedManualObject() : state.mode === 'concept' ? adjustConcept('conceptAct', 1) : adjust('turns', 1)), { size: 12, fill: state.mode === 'manual' ? 0x4b2030 : COLORS.panel2, stroke: state.mode === 'manual' ? COLORS.red : 0x52617b });
+    this.button(leftX, 642, 118, 42, '-BALL', () => adjust('balls', -1), { size: 13 });
+    this.button(rightX, 642, 118, 42, '+BALL', () => adjust('balls', 1), { size: 13 });
+    this.button(thirdX, 642, 86, 42, 'TEST', () => this.startEditorTest(), { size: 13, fill: 0x2c6f84, stroke: 0x5eead4, primary: true });
 
-    this.button(95, 1102, 62, 42, state.mode === 'manual' ? 'UNDO' : state.mode === 'concept' ? '-C' : '-8', () => (state.mode === 'manual' ? this.undoEditorHistory() : state.mode === 'concept' ? adjustConcept('conceptIndex', -1) : adjust('count', -8)), { size: 14 });
-    this.button(170, 1102, 62, 42, state.mode === 'manual' ? 'SEL-' : state.mode === 'concept' ? '+C' : '+8', () => (state.mode === 'manual' ? this.cycleManualSelection(-1) : state.mode === 'concept' ? adjustConcept('conceptIndex', 1) : adjust('count', 8)), { size: 13, fill: state.mode === 'manual' ? 0x263449 : COLORS.panel2, stroke: state.mode === 'manual' ? 0x93c5fd : 0x52617b });
-    this.button(278, 1102, 62, 42, state.mode === 'manual' ? 'SEL+' : state.mode === 'concept' ? '-V' : '-20', () => (state.mode === 'manual' ? this.cycleManualSelection(1) : state.mode === 'concept' ? adjustConcept('conceptAct', -1) : adjust('radius', -20)), { size: 13, fill: state.mode === 'manual' ? 0x263449 : COLORS.panel2, stroke: state.mode === 'manual' ? 0x93c5fd : 0x52617b });
-    this.button(354, 1102, 62, 42, state.mode === 'manual' ? 'TYPE' : state.mode === 'concept' ? '+V' : '+20', () => (state.mode === 'manual' ? this.cycleSelectedManualType() : state.mode === 'concept' ? adjustConcept('conceptAct', 1) : adjust('radius', 20)), { size: 12, fill: state.mode === 'manual' ? 0x1f3a5f : COLORS.panel2, stroke: state.mode === 'manual' ? COLORS.blue : 0x52617b });
-    this.button(476, 1102, 62, 42, state.mode === 'manual' ? 'PROP-' : state.mode === 'concept' ? 'BAKE' : '-1', () => (state.mode === 'manual' ? this.adjustSelectedManualProperty(-1) : state.mode === 'concept' ? this.bakeConceptToManual() : adjust('turns', -1)), { size: state.mode === 'concept' ? 11 : 10, fill: state.mode === 'concept' ? 0x4a3d21 : COLORS.panel2, stroke: state.mode === 'concept' ? COLORS.gold : 0x52617b });
-    this.button(552, 1102, 62, 42, state.mode === 'manual' ? 'PROP+' : state.mode === 'concept' ? 'PLAY' : '+1', () => (state.mode === 'manual' ? this.adjustSelectedManualProperty(1) : state.mode === 'concept' ? this.startEditorTest() : adjust('turns', 1)), { size: state.mode === 'manual' ? 10 : 13 });
-    this.button(662, 1102, 62, 42, state.mode === 'manual' ? 'DEL' : '-1', () => (state.mode === 'manual' ? this.deleteSelectedManualObject() : adjust('balls', -1)), { size: 14, fill: state.mode === 'manual' ? 0x4b2030 : COLORS.panel2, stroke: state.mode === 'manual' ? COLORS.red : 0x52617b });
-    this.button(738, 1102, 62, 42, '+1', () => adjust('balls', 1), { size: 16 });
+    this.addLabel(930, 720, 'STAGE FILES', { family: 'Verdana', size: 18, color: '#93c5fd', shadow: false });
+    this.button(leftX, 768, 118, 42, `LV ${String(state.stageEditLevel).padStart(3, '0')}`, () => this.cycleEditorStage(1), { size: 13, fill: 0x263449, stroke: 0x93c5fd });
+    this.button(rightX - 34, 768, 58, 42, '-LV', () => this.cycleEditorStage(-1), { size: 12 });
+    this.button(rightX + 34, 768, 58, 42, '+LV', () => this.cycleEditorStage(1), { size: 12 });
+    this.button(thirdX, 768, 86, 42, 'AUDIT', () => this.showStageAudit(), { size: 12, fill: 0x1f3a5f, stroke: COLORS.cyan });
+    this.button(leftX, 820, 118, 42, 'LOAD LV', () => this.loadEditorStageNumber(), { size: 12, fill: 0x334155, stroke: 0x93c5fd });
+    this.button(rightX, 820, 118, 42, 'SAVE LV', () => this.saveEditorStageNumber(), { size: 12, fill: 0x4a3d21, stroke: COLORS.gold });
+    this.button(thirdX, 820, 86, 42, 'BUNDLE', () => this.exportAllPlayableStages(), { size: 11, fill: 0x3f2f56, stroke: 0xc084fc });
 
-    this.button(122, 1170, 110, 48, `SLOT ${state.slotIndex + 1}`, () => this.cycleEditorSlot(1), { size: 15, fill: 0x263449, stroke: 0x93c5fd });
-    this.button(258, 1170, 130, 48, 'SAVE', () => this.saveEditorSlot(), { size: 16, fill: 0x4a3d21, stroke: COLORS.gold });
-    this.button(398, 1170, 130, 48, 'LOAD', () => this.loadEditorSlot(), { size: 16, fill: 0x334155, stroke: 0x93c5fd });
-    this.button(558, 1170, 140, 48, 'EXPORT', () => this.exportEditorJson(), { size: 15, fill: 0x1f3a5f, stroke: COLORS.cyan });
-    this.button(718, 1170, 140, 48, 'IMPORT', () => this.importEditorJson(), { size: 15, fill: 0x3f2f56, stroke: 0xc084fc });
-
-    this.button(118, 1230, 108, 42, `LV ${String(state.stageEditLevel).padStart(3, '0')}`, () => this.cycleEditorStage(1), { size: 14, fill: 0x263449, stroke: 0x93c5fd });
-    this.button(220, 1230, 64, 42, '-LV', () => this.cycleEditorStage(-1), { size: 13 });
-    this.button(296, 1230, 64, 42, '+LV', () => this.cycleEditorStage(1), { size: 13 });
-    this.button(414, 1230, 122, 42, 'LOAD LV', () => this.loadEditorStageNumber(), { size: 13, fill: 0x334155, stroke: 0x93c5fd });
-    this.button(548, 1230, 122, 42, 'SAVE LV', () => this.saveEditorStageNumber(), { size: 13, fill: 0x4a3d21, stroke: COLORS.gold });
-    this.button(682, 1230, 96, 42, 'AUDIT', () => this.showStageAudit(), { size: 13, fill: 0x1f3a5f, stroke: COLORS.cyan });
-    this.button(790, 1230, 92, 42, 'BUNDLE', () => this.exportAllPlayableStages(), { size: 12, fill: 0x3f2f56, stroke: 0xc084fc });
+    this.addLabel(930, 898, 'LOCAL SLOT / JSON', { family: 'Verdana', size: 18, color: '#93c5fd', shadow: false });
+    this.button(leftX, 946, 118, 42, `SLOT ${state.slotIndex + 1}`, () => this.cycleEditorSlot(1), { size: 13, fill: 0x263449, stroke: 0x93c5fd });
+    this.button(rightX, 946, 118, 42, 'SAVE', () => this.saveEditorSlot(), { size: 13, fill: 0x4a3d21, stroke: COLORS.gold });
+    this.button(thirdX, 946, 86, 42, 'LOAD', () => this.loadEditorSlot(), { size: 12, fill: 0x334155, stroke: 0x93c5fd });
+    this.button(leftX, 998, 118, 42, 'EXPORT', () => this.exportEditorJson(), { size: 13, fill: 0x1f3a5f, stroke: COLORS.cyan });
+    this.button(rightX, 998, 118, 42, 'IMPORT', () => this.importEditorJson(), { size: 13, fill: 0x3f2f56, stroke: 0xc084fc });
+    this.addLabel(930, 1042, `BALLS ${state.balls}   SNAP ${state.gridSnap ? 'ON' : 'OFF'}`, { family: 'Verdana', size: 15, color: COLORS.text, shadow: false });
   }
 
   updateEditorState(nextState) {
@@ -1604,28 +1607,28 @@ class PegFanScene extends Phaser.Scene {
   }
 
   renderSelectedPropertyPanel(selected) {
-    this.add.rectangle(692, 384, 250, 246, 0x07101d, 0.92).setStrokeStyle(2, COLORS.gold, selected ? 0.82 : 0x2d3d58).setDepth(8);
-    this.add.text(584, 278, 'PROPERTY', {
+    this.add.rectangle(1082, 1174, 344, 226, 0x07101d, 0.92).setStrokeStyle(2, COLORS.gold, selected ? 0.82 : 0x2d3d58).setDepth(8);
+    this.add.text(930, 1078, 'PROPERTY', {
       fontFamily: 'Verdana',
       fontSize: 15,
       fontStyle: '700',
       color: '#ffd35a',
     }).setDepth(9);
-    this.add.text(584, 306, this.selectedManualSummary(selected).join('\n'), {
+    this.add.text(930, 1106, this.selectedManualSummary(selected).join('\n'), {
       fontFamily: 'Consolas, Verdana',
       fontSize: 13,
       lineSpacing: 5,
       color: selected ? COLORS.text : COLORS.muted,
     }).setDepth(9);
-    this.button(608, 406, 54, 34, 'X-', () => this.moveSelectedManualObject(-8, 0), { size: 12, fill: 0x263449, depth: 10 });
-    this.button(672, 406, 54, 34, 'X+', () => this.moveSelectedManualObject(8, 0), { size: 12, fill: 0x263449, depth: 10 });
-    this.button(736, 406, 54, 34, 'Y-', () => this.moveSelectedManualObject(0, -8), { size: 12, fill: 0x263449, depth: 10 });
-    this.button(800, 406, 54, 34, 'Y+', () => this.moveSelectedManualObject(0, 8), { size: 12, fill: 0x263449, depth: 10 });
-    this.button(632, 450, 76, 34, 'ROT-', () => this.rotateSelectedManualObject(-1), { size: 11, fill: 0x1f3a5f, depth: 10 });
-    this.button(720, 450, 76, 34, 'ROT+', () => this.rotateSelectedManualObject(1), { size: 11, fill: 0x1f3a5f, depth: 10 });
-    this.button(808, 450, 76, 34, 'TYPE', () => this.cycleSelectedManualType(), { size: 11, fill: 0x1f3a5f, stroke: COLORS.blue, depth: 10 });
-    this.button(650, 494, 96, 34, 'SIZE-', () => this.adjustSelectedManualProperty(-1), { size: 11, fill: 0x4a3d21, stroke: COLORS.gold, depth: 10 });
-    this.button(762, 494, 96, 34, 'SIZE+', () => this.adjustSelectedManualProperty(1), { size: 11, fill: 0x4a3d21, stroke: COLORS.gold, depth: 10 });
+    this.button(958, 1184, 62, 34, 'X-', () => this.moveSelectedManualObject(-8, 0), { size: 12, fill: 0x263449, depth: 10 });
+    this.button(1028, 1184, 62, 34, 'X+', () => this.moveSelectedManualObject(8, 0), { size: 12, fill: 0x263449, depth: 10 });
+    this.button(1098, 1184, 62, 34, 'Y-', () => this.moveSelectedManualObject(0, -8), { size: 12, fill: 0x263449, depth: 10 });
+    this.button(1168, 1184, 62, 34, 'Y+', () => this.moveSelectedManualObject(0, 8), { size: 12, fill: 0x263449, depth: 10 });
+    this.button(966, 1228, 76, 34, 'ROT-', () => this.rotateSelectedManualObject(-1), { size: 11, fill: 0x1f3a5f, depth: 10 });
+    this.button(1054, 1228, 76, 34, 'ROT+', () => this.rotateSelectedManualObject(1), { size: 11, fill: 0x1f3a5f, depth: 10 });
+    this.button(1142, 1228, 76, 34, 'TYPE', () => this.cycleSelectedManualType(), { size: 11, fill: 0x1f3a5f, stroke: COLORS.blue, depth: 10 });
+    this.button(1010, 1270, 96, 34, 'SIZE-', () => this.adjustSelectedManualProperty(-1), { size: 11, fill: 0x4a3d21, stroke: COLORS.gold, depth: 10 });
+    this.button(1122, 1270, 96, 34, 'SIZE+', () => this.adjustSelectedManualProperty(1), { size: 11, fill: 0x4a3d21, stroke: COLORS.gold, depth: 10 });
   }
 
   deleteSelectedManualObject() {
@@ -1654,7 +1657,7 @@ class PegFanScene extends Phaser.Scene {
   }
 
   editorBounds() {
-    return { left: 80, right: 820, top: 258, bottom: 892 };
+    return { left: 54, right: 846, top: 222, bottom: 1190 };
   }
 
   snapEditorPoint(pointer) {
@@ -1989,12 +1992,12 @@ class PegFanScene extends Phaser.Scene {
 
   renderEditorPreview() {
     const level = this.buildEditorLevel();
-    const panel = this.add.rectangle(WIDTH / 2, 548, 812, 690, 0x0b111b, 0.78).setStrokeStyle(2, 0x243044);
+    const panel = this.add.rectangle(WIDTH / 2, 706, 860, 984, 0x0b111b, 0.78).setStrokeStyle(2, 0x243044);
     panel.setDepth(1);
     if (this.editorState.mode === 'manual') this.renderManualGrid();
     this.add.rectangle(WIDTH / 2, 238, 42, 42, 0x1f2a3c, 1).setStrokeStyle(3, COLORS.gold).setDepth(2);
     this.add.line(0, 0, 80, 258, 820, 258, 0x334155, 0.75).setOrigin(0).setDepth(2);
-    this.add.line(0, 0, 80, 1068, 820, 1068, 0x334155, 0.75).setOrigin(0).setDepth(2);
+    this.add.line(0, 0, 80, 1190, 820, 1190, 0x334155, 0.75).setOrigin(0).setDepth(2);
 
     level.pegs.forEach((peg) => {
       const color = peg.type === 'orange' ? COLORS.orange : peg.type === 'green' ? COLORS.green : peg.type === 'purple' ? COLORS.purple : COLORS.blue;
@@ -2047,7 +2050,7 @@ class PegFanScene extends Phaser.Scene {
     }).setDepth(4);
     if (this.editorState.mode === 'manual') {
       const selected = this.editorState.selectedManualIndex >= 0 ? `   SELECTED #${this.editorState.selectedManualIndex + 1}` : '';
-      this.add.text(78, 858, `CLICK: SELECT/PLACE   DRAG: LINE   PROP: SIZE   TYPE: COLOR${selected}`, {
+      this.add.text(78, 1150, `CLICK: SELECT/PLACE   DRAG: LINE   PROP: SIZE   TYPE: COLOR${selected}`, {
         fontFamily: 'Verdana',
         fontSize: 13,
         fontStyle: '700',
@@ -3163,7 +3166,7 @@ class PegFanScene extends Phaser.Scene {
 const game = new Phaser.Game({
   type: Phaser.AUTO,
   parent: 'game',
-  width: WIDTH,
+  width: SCREEN_WIDTH,
   height: HEIGHT,
   backgroundColor: '#101521',
   physics: {
