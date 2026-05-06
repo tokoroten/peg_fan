@@ -677,7 +677,7 @@ class PegFanScene extends Phaser.Scene {
   setCanvasWidth(width) {
     if (this.currentCanvasWidth === width) return;
     this.currentCanvasWidth = width;
-    this.scale.resize(width, HEIGHT);
+    this.scale.setGameSize(width, HEIGHT);
     this.cameras.main.setViewport(0, 0, width, HEIGHT);
     this.cameras.main.setSize(width, HEIGHT);
   }
