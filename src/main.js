@@ -43,7 +43,9 @@ const EDITOR_SHAPES = ['circle', 'spiral', 'bezier', 'wave', 'grid'];
 const EDITOR_PARTS = ['mixed', 'pegs', 'bricks', 'rails', 'bumpers'];
 const EDITOR_TYPES = ['auto', 'orange', 'blue', 'green', 'purple'];
 const EDITOR_MODES = ['concept', 'procedural', 'manual'];
-const EDITOR_MANUAL_TOOLS = ['peg', 'brick', 'rail', 'bumper', 'timed', 'spinner', 'erase'];
+const EDITOR_MANUAL_TOOLS = ['peg', 'brick', 'rail', 'curve', 'bumper', 'timed', 'spinner', 'erase'];
+const EDITOR_CURVE_MODES = ['arc', 'bezier', 'circle'];
+const EDITOR_CURVE_PARTS = ['brick', 'rail'];
 const EDITOR_CONCEPTS = [
   { key: 'open arcs', label: 'OPEN ARCS', description: '角度学習用の開いた弧と下段セーフティレール。' },
   { key: 'cross lanes', label: 'CROSS LANES', description: '左右から交差するレーンと斜め反射。' },
@@ -142,6 +144,10 @@ function loadEditorState() {
     gridSnap: false,
     selectedManualIndex: -1,
     selectedManualIndices: [],
+    curveMode: 'arc',
+    curvePart: 'brick',
+    curveSegments: 32,
+    curveThickness: MANUAL_BRICK_THICKNESS,
     manualObjects: [],
   };
   try {
@@ -186,6 +192,10 @@ function clampEditorState(state) {
     slotIndex: Phaser.Math.Clamp(Math.round(state.slotIndex ?? 0), 0, EDITOR_SLOT_COUNT - 1),
     stageEditLevel: Phaser.Math.Clamp(Math.round(state.stageEditLevel ?? 1), 1, EDITOR_STAGE_COUNT),
     manualTool: EDITOR_MANUAL_TOOLS.includes(state.manualTool) ? state.manualTool : 'peg',
+    curveMode: EDITOR_CURVE_MODES.includes(state.curveMode) ? state.curveMode : 'arc',
+    curvePart: EDITOR_CURVE_PARTS.includes(state.curvePart) ? state.curvePart : 'brick',
+    curveSegments: Phaser.Math.Clamp(Math.round(state.curveSegments ?? 32), 8, 72),
+    curveThickness: Phaser.Math.Clamp(Math.round(state.curveThickness ?? MANUAL_BRICK_THICKNESS), 8, 38),
     gridSnap: Boolean(state.gridSnap),
     selectedManualIndex: Phaser.Math.Clamp(Math.round(state.selectedManualIndex ?? -1), -1, Math.max(-1, (state.manualObjects?.length ?? 0) - 1)),
     selectedManualIndices: Array.isArray(state.selectedManualIndices)
@@ -1124,11 +1134,11 @@ class PegFanScene extends Phaser.Scene {
     this.button(rightX, 530, 118, 42, randomLabel, randomAction, { size: 13, fill: 0x3f2f56, stroke: 0xc084fc });
     this.button(thirdX, 530, 86, 42, state.mode === 'manual' ? 'UNDO' : state.mode === 'concept' ? '-C' : '-8', () => (state.mode === 'manual' ? this.undoEditorHistory() : state.mode === 'concept' ? adjustConcept('conceptIndex', -1) : adjust('count', -8)), { size: 12 });
 
-    this.button(leftX, 590, 118, 42, state.mode === 'manual' ? 'SEL-' : state.mode === 'concept' ? '+C' : '+8', () => (state.mode === 'manual' ? this.cycleManualSelection(-1) : state.mode === 'concept' ? adjustConcept('conceptIndex', 1) : adjust('count', 8)), { size: 13 });
-    this.button(rightX, 590, 118, 42, state.mode === 'manual' ? 'SEL+' : state.mode === 'concept' ? '-V' : '-20', () => (state.mode === 'manual' ? this.cycleManualSelection(1) : state.mode === 'concept' ? adjustConcept('conceptAct', -1) : adjust('radius', -20)), { size: 13 });
+    this.button(leftX, 590, 118, 42, state.mode === 'manual' && state.manualTool === 'curve' ? this.titleCase(state.curveMode) : state.mode === 'manual' ? 'SEL-' : state.mode === 'concept' ? '+C' : '+8', () => (state.mode === 'manual' && state.manualTool === 'curve' ? cycle('curveMode', EDITOR_CURVE_MODES) : state.mode === 'manual' ? this.cycleManualSelection(-1) : state.mode === 'concept' ? adjustConcept('conceptIndex', 1) : adjust('count', 8)), { size: state.mode === 'manual' && state.manualTool === 'curve' ? 11 : 13 });
+    this.button(rightX, 590, 118, 42, state.mode === 'manual' && state.manualTool === 'curve' ? this.titleCase(state.curvePart) : state.mode === 'manual' ? 'SEL+' : state.mode === 'concept' ? '-V' : '-20', () => (state.mode === 'manual' && state.manualTool === 'curve' ? cycle('curvePart', EDITOR_CURVE_PARTS) : state.mode === 'manual' ? this.cycleManualSelection(1) : state.mode === 'concept' ? adjustConcept('conceptAct', -1) : adjust('radius', -20)), { size: state.mode === 'manual' && state.manualTool === 'curve' ? 11 : 13 });
     this.button(thirdX, 590, 86, 42, state.mode === 'manual' ? 'DEL' : '+1', () => (state.mode === 'manual' ? this.deleteSelectedManualObject() : state.mode === 'concept' ? adjustConcept('conceptAct', 1) : adjust('turns', 1)), { size: 12, fill: state.mode === 'manual' ? 0x4b2030 : COLORS.panel2, stroke: state.mode === 'manual' ? COLORS.red : 0x52617b });
-    this.button(leftX, 642, 118, 42, '-BALL', () => adjust('balls', -1), { size: 13 });
-    this.button(rightX, 642, 118, 42, '+BALL', () => adjust('balls', 1), { size: 13 });
+    this.button(leftX, 642, 118, 42, state.mode === 'manual' && state.manualTool === 'curve' ? '-SEG' : '-BALL', () => (state.mode === 'manual' && state.manualTool === 'curve' ? adjust('curveSegments', -3) : adjust('balls', -1)), { size: 13 });
+    this.button(rightX, 642, 118, 42, state.mode === 'manual' && state.manualTool === 'curve' ? '+SEG' : '+BALL', () => (state.mode === 'manual' && state.manualTool === 'curve' ? adjust('curveSegments', 3) : adjust('balls', 1)), { size: 13 });
     this.button(thirdX, 642, 86, 42, 'TEST', () => this.startEditorTest(), { size: 13, fill: 0x2c6f84, stroke: 0x5eead4, primary: true });
 
     this.addLabel(930, 720, 'STAGE FILES', { family: 'Verdana', size: 18, color: '#93c5fd', shadow: false });
@@ -1146,7 +1156,10 @@ class PegFanScene extends Phaser.Scene {
     this.button(thirdX, 946, 86, 42, 'LOAD', () => this.loadEditorSlot(), { size: 12, fill: 0x334155, stroke: 0x93c5fd });
     this.button(leftX, 998, 118, 42, 'EXPORT', () => this.exportEditorJson(), { size: 13, fill: 0x1f3a5f, stroke: COLORS.cyan });
     this.button(rightX, 998, 118, 42, 'IMPORT', () => this.importEditorJson(), { size: 13, fill: 0x3f2f56, stroke: 0xc084fc });
-    this.addLabel(930, 1042, `BALLS ${state.balls}   SNAP ${state.gridSnap ? 'ON' : 'OFF'}`, { family: 'Verdana', size: 15, color: COLORS.text, shadow: false });
+    const curveStatus = state.mode === 'manual' && state.manualTool === 'curve'
+      ? `CURVE ${state.curveSegments} SEG ${state.curveThickness}px`
+      : `BALLS ${state.balls}`;
+    this.addLabel(930, 1042, `${curveStatus}   SNAP ${state.gridSnap ? 'ON' : 'OFF'}`, { family: 'Verdana', size: 15, color: COLORS.text, shadow: false });
   }
 
   updateEditorState(nextState) {
@@ -1809,6 +1822,43 @@ class PegFanScene extends Phaser.Scene {
     }).setDepth(6);
   }
 
+  renderManualSelectionMarkers(selectedIndices) {
+    if (!selectedIndices.length) return;
+    const selectedObjects = selectedIndices.map((index) => this.editorState.manualObjects?.[index]).filter(Boolean);
+    if (selectedObjects.length > 8) {
+      const centers = selectedObjects.map((object) => this.objectCenter(object));
+      const xs = centers.map((point) => point.x);
+      const ys = centers.map((point) => point.y);
+      const left = Math.min(...xs) - 24;
+      const right = Math.max(...xs) + 24;
+      const top = Math.min(...ys) - 24;
+      const bottom = Math.max(...ys) + 24;
+      const marker = this.add.graphics().setDepth(7);
+      marker.lineStyle(3, COLORS.gold, 0.95);
+      marker.strokeRoundedRect(left, top, right - left, bottom - top, 12);
+      marker.lineStyle(2, COLORS.cyan, 0.72);
+      centers.forEach((center) => marker.strokeCircle(center.x, center.y, 4));
+      return;
+    }
+    selectedObjects.forEach((selectedObject) => {
+      const center = this.objectCenter(selectedObject);
+      const marker = this.add.graphics().setDepth(7);
+      marker.lineStyle(3, COLORS.gold, 0.98);
+      if (Array.isArray(selectedObject.vertices)) {
+        const points = normalizeQuad(selectedObject);
+        marker.beginPath();
+        marker.moveTo(points[0].x, points[0].y);
+        points.slice(1).forEach((point) => marker.lineTo(point.x, point.y));
+        marker.closePath();
+        marker.strokePath();
+      } else {
+        marker.strokeCircle(center.x, center.y, (selectedObject.r ?? 22) + 12);
+      }
+      marker.lineStyle(2, COLORS.cyan, 0.8);
+      marker.strokeCircle(center.x, center.y, 5);
+    });
+  }
+
   deleteSelectedManualObject() {
     const selected = this.normalizeManualSelection();
     if (!selected.length) {
@@ -1871,8 +1921,9 @@ class PegFanScene extends Phaser.Scene {
   snapEditorPoint(pointer) {
     const bounds = this.editorBounds();
     const world = this.getPointerWorld(pointer);
-    const x = this.editorState.gridSnap ? Math.round(world.x / EDITOR_GRID) * EDITOR_GRID : world.x;
-    const y = this.editorState.gridSnap ? Math.round(world.y / EDITOR_GRID) * EDITOR_GRID : world.y;
+    const shouldSnap = this.editorState.gridSnap && this.editorState.manualTool !== 'curve';
+    const x = shouldSnap ? Math.round(world.x / EDITOR_GRID) * EDITOR_GRID : world.x;
+    const y = shouldSnap ? Math.round(world.y / EDITOR_GRID) * EDITOR_GRID : world.y;
     return {
       x: Phaser.Math.Clamp(x, bounds.left, bounds.right),
       y: Phaser.Math.Clamp(y, bounds.top, bounds.bottom),
@@ -1898,6 +1949,77 @@ class PegFanScene extends Phaser.Scene {
     if (tool === 'spinner') this.addManualObject({ kind: 'spinner', x: point.x, y: point.y, radius: 58, speed: 0.9, phase: 0 });
   }
 
+  sampleManualCurve(start, end) {
+    const mode = this.editorState.curveMode;
+    const segments = this.editorState.curveSegments;
+    const points = [];
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const distance = Math.max(1, Math.hypot(dx, dy));
+    const normal = { x: -dy / distance, y: dx / distance };
+    if (mode === 'circle') {
+      const center = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
+      const radiusX = Math.max(28, Math.abs(dx) / 2);
+      const radiusY = Math.max(28, Math.abs(dy) / 2 || radiusX * 0.65);
+      for (let i = 0; i <= segments; i += 1) {
+        const angle = -Math.PI / 2 + (i / segments) * Math.PI * 2;
+        points.push({ x: center.x + Math.cos(angle) * radiusX, y: center.y + Math.sin(angle) * radiusY });
+      }
+      return points;
+    }
+    if (mode === 'bezier') {
+      const bend = Phaser.Math.Clamp(distance * 0.38, 70, 230);
+      const p1 = { x: start.x + dx * 0.32 + normal.x * bend, y: start.y + dy * 0.32 + normal.y * bend };
+      const p2 = { x: start.x + dx * 0.68 - normal.x * bend * 0.55, y: start.y + dy * 0.68 - normal.y * bend * 0.55 };
+      for (let i = 0; i <= segments; i += 1) {
+        const t = i / segments;
+        const u = 1 - t;
+        points.push({
+          x: u ** 3 * start.x + 3 * u ** 2 * t * p1.x + 3 * u * t ** 2 * p2.x + t ** 3 * end.x,
+          y: u ** 3 * start.y + 3 * u ** 2 * t * p1.y + 3 * u * t ** 2 * p2.y + t ** 3 * end.y,
+        });
+      }
+      return points;
+    }
+    const sag = Phaser.Math.Clamp(distance * 0.32, 60, 220);
+    for (let i = 0; i <= segments; i += 1) {
+      const t = i / segments;
+      const lift = Math.sin(t * Math.PI) * sag;
+      points.push({
+        x: start.x + dx * t + normal.x * lift,
+        y: start.y + dy * t + normal.y * lift,
+      });
+    }
+    return points;
+  }
+
+  createManualCurve(start, end) {
+    const distance = Math.hypot(end.x - start.x, end.y - start.y);
+    if (distance < 42) {
+      this.editorToast('DRAG LONGER CURVE');
+      return;
+    }
+    const type = this.manualType();
+    const kind = this.editorState.curvePart;
+    const thickness = kind === 'rail'
+      ? Math.max(8, Math.min(this.editorState.curveThickness, 24))
+      : this.editorState.curveThickness;
+    const overlap = Math.max(kind === 'rail' ? 5 : 7, thickness * 0.72);
+    const points = this.sampleManualCurve(start, end);
+    const objects = [];
+    for (let i = 0; i < points.length - 1; i += 1) {
+      if (Math.hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y) < 5) continue;
+      const item = { kind, vertices: segmentQuad(points[i], points[i + 1], thickness, overlap) };
+      if (kind === 'brick') item.type = type;
+      objects.push(item);
+    }
+    if (!objects.length) return;
+    const startIndex = this.editorState.manualObjects.length;
+    this.setManualObjects([...this.editorState.manualObjects, ...objects]);
+    this.syncManualSelection(Array.from({ length: objects.length }, (_, offset) => startIndex + offset));
+    saveEditorState(this.editorState);
+  }
+
   createManualLine(start, end) {
     const dx = end.x - start.x;
     const dy = end.y - start.y;
@@ -1908,6 +2030,10 @@ class PegFanScene extends Phaser.Scene {
     }
     const tool = this.editorState.manualTool;
     const type = this.manualType();
+    if (tool === 'curve') {
+      this.createManualCurve(start, end);
+      return;
+    }
     const spacing = tool === 'peg' ? 38 : tool === 'bumper' ? 58 : tool === 'spinner' ? 120 : tool === 'timed' ? 150 : tool === 'rail' ? 96 : 74;
     const objects = [];
     if (tool === 'brick') {
@@ -2313,25 +2439,7 @@ class PegFanScene extends Phaser.Scene {
     if (this.editorState.mode === 'manual') {
       const selectedIndices = this.normalizeManualSelection();
       const selected = this.editorState.manualObjects?.[this.editorState.selectedManualIndex];
-      selectedIndices.forEach((index) => {
-        const selectedObject = this.editorState.manualObjects?.[index];
-        if (!selectedObject) return;
-        const center = this.objectCenter(selectedObject);
-        const marker = this.add.graphics().setDepth(7);
-        marker.lineStyle(3, COLORS.gold, 0.98);
-        if (Array.isArray(selectedObject.vertices)) {
-          const points = normalizeQuad(selectedObject);
-          marker.beginPath();
-          marker.moveTo(points[0].x, points[0].y);
-          points.slice(1).forEach((point) => marker.lineTo(point.x, point.y));
-          marker.closePath();
-          marker.strokePath();
-        } else {
-          marker.strokeCircle(center.x, center.y, (selectedObject.r ?? 22) + 12);
-        }
-        marker.lineStyle(2, COLORS.cyan, 0.8);
-        marker.strokeCircle(center.x, center.y, 5);
-      });
+      this.renderManualSelectionMarkers(selectedIndices);
       this.renderSelectedPropertyPanel(selected);
     }
     this.add.text(78, 282, `OBJECTS ${level.pegs.length + level.bricks.length + level.rails.length + level.bumpers.length + level.timedBlocks.length + level.spinners.length}   ORANGE ${level.targetCount}`, {
@@ -2344,7 +2452,10 @@ class PegFanScene extends Phaser.Scene {
     if (this.editorState.mode === 'manual') {
       const selectedCount = this.normalizeManualSelection().length;
       const selected = selectedCount ? `   SELECTED ${selectedCount}` : '';
-      this.add.text(78, 1150, `CLICK: SELECT/DRAG MOVE   SHIFT: MULTI/RANGE   CTRL+C/V/A/D   DRAG EMPTY: LINE${selected}`, {
+      const curveHint = this.editorState.manualTool === 'curve'
+        ? `   CURVE ${this.editorState.curveMode.toUpperCase()} ${this.editorState.curvePart.toUpperCase()}`
+        : '';
+      this.add.text(78, 1150, `CLICK: SELECT/DRAG MOVE   SHIFT: MULTI/RANGE   CTRL+C/V/A/D   DRAG EMPTY: LINE/CURVE${curveHint}${selected}`, {
         fontFamily: 'Verdana',
         fontSize: 13,
         fontStyle: '700',
