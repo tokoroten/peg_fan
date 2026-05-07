@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
     "audit:stages": "node scripts/audit-stages.mjs",
+    "qa:curves": "node scripts/qa-curves.mjs",
     "apply:stage-bundle": "node scripts/apply-stage-bundle.mjs"
   },
   "keywords": [],
