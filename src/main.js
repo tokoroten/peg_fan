@@ -46,7 +46,38 @@ const EDITOR_MODES = ['concept', 'procedural', 'manual'];
 const EDITOR_MANUAL_TOOLS = ['peg', 'brick', 'rail', 'curve', 'bumper', 'timed', 'spinner', 'erase'];
 const EDITOR_CURVE_MODES = ['arc', 'bezier', 'circle'];
 const EDITOR_CURVE_PARTS = ['brick', 'rail'];
-const EDITOR_CURVE_PRESETS = ['bowl', 'ring', 'snake', 's-curve', 'wide arc', 'small arc'];
+const EDITOR_CURVE_PRESETS = [
+  'bowl',
+  'ring',
+  'snake',
+  's-curve',
+  'wide arc',
+  'small arc',
+  'double bowl',
+  'orbit gate',
+  'pinball cup',
+  'rail funnel',
+  'target halo',
+  'bumper crown',
+  'zigzag lane',
+  'wave ladder',
+  'spiral pocket',
+  'cross gate',
+  'left scoop',
+  'right scoop',
+  'splitter lanes',
+  'timed gate',
+  'spinner orbit',
+  'peg smile',
+  'stair rails',
+  'final loop',
+  'hourglass',
+  'comet tail',
+  'shield wall',
+  'bounce garden',
+  'dual funnels',
+  'timing ribbon',
+];
 const EDITOR_CONCEPTS = [
   { key: 'open arcs', label: 'OPEN ARCS', description: '角度学習用の開いた弧と下段セーフティレール。' },
   { key: 'cross lanes', label: 'CROSS LANES', description: '左右から交差するレーンと斜め反射。' },
@@ -2068,21 +2099,196 @@ class PegFanScene extends Phaser.Scene {
     this.setManualObjectsWithSelection(objects);
   }
 
+  presetCurveObjects({ mode = 'arc', part = this.editorState.curvePart, type = this.manualType(), start, end, thickness = this.editorState.curveThickness, segments = this.editorState.curveSegments }) {
+    const previous = {
+      curveMode: this.editorState.curveMode,
+      curvePart: this.editorState.curvePart,
+      curveThickness: this.editorState.curveThickness,
+      curveSegments: this.editorState.curveSegments,
+      type: this.editorState.type,
+    };
+    this.editorState.curveMode = mode;
+    this.editorState.curvePart = part;
+    this.editorState.curveThickness = thickness;
+    this.editorState.curveSegments = segments;
+    this.editorState.type = type;
+    const objects = this.manualCurveObjects(start, end);
+    Object.assign(this.editorState, previous);
+    return objects;
+  }
+
+  ellipsePresetPoints(cx, cy, rx, ry, count, startAngle = 0, endAngle = Math.PI * 2) {
+    return Array.from({ length: count }, (_, index) => {
+      const t = count === 1 ? 0 : index / (count - 1);
+      const angle = startAngle + (endAngle - startAngle) * t;
+      return { x: cx + Math.cos(angle) * rx, y: cy + Math.sin(angle) * ry };
+    });
+  }
+
+  linePresetPoints(start, end, count) {
+    return Array.from({ length: count }, (_, index) => {
+      const t = count === 1 ? 0 : index / (count - 1);
+      return { x: Phaser.Math.Linear(start.x, end.x, t), y: Phaser.Math.Linear(start.y, end.y, t) };
+    });
+  }
+
+  pegPresetObjects(points, { orangeEvery = 5, type = 'blue', purpleEvery = 0, greenAt = [] } = {}) {
+    return points.map((point, index) => {
+      let pegType = type;
+      if (orangeEvery > 0 && index % orangeEvery === 0) pegType = 'orange';
+      if (purpleEvery > 0 && index % purpleEvery === 0) pegType = 'purple';
+      if (greenAt.includes(index)) pegType = 'green';
+      return { kind: 'peg', x: point.x, y: point.y, type: pegType };
+    });
+  }
+
+  templatePresetObjects(name) {
+    const objects = [];
+    const arc = (start, end, options = {}) => objects.push(...this.presetCurveObjects({ mode: 'arc', start, end, ...options }));
+    const circle = (start, end, options = {}) => objects.push(...this.presetCurveObjects({ mode: 'circle', start, end, ...options }));
+    const bezier = (start, end, options = {}) => objects.push(...this.presetCurveObjects({ mode: 'bezier', start, end, ...options }));
+    const pegs = (points, options = {}) => objects.push(...this.pegPresetObjects(points, options));
+    const ellipse = (...args) => this.ellipsePresetPoints(...args);
+    const line = (...args) => this.linePresetPoints(...args);
+
+    if (name === 'ring') {
+      circle({ x: 230, y: 420 }, { x: 670, y: 860 }, { part: 'brick', type: 'blue' });
+      pegs(ellipse(450, 640, 150, 150, 18), { orangeEvery: 4, greenAt: [6] });
+      objects.push({ kind: 'bumper', x: 450, y: 640, r: 30 });
+    } else if (name === 'snake') {
+      bezier({ x: 120, y: 540 }, { x: 790, y: 880 }, { part: 'rail' });
+      pegs(ellipse(455, 705, 300, 120, 19, Math.PI * 0.12, Math.PI * 1.2), { orangeEvery: 4 });
+      objects.push({ kind: 'spinner', x: 455, y: 735, radius: 58, speed: -0.85, phase: 0.4 });
+    } else if (name === 's-curve') {
+      bezier({ x: 140, y: 880 }, { x: 780, y: 470 }, { part: 'brick', type: 'blue' });
+      pegs(line({ x: 190, y: 520 }, { x: 730, y: 840 }, 14), { orangeEvery: 3 });
+    } else if (name === 'wide arc') {
+      arc({ x: 120, y: 760 }, { x: 790, y: 760 }, { part: 'rail' });
+      pegs(ellipse(450, 755, 275, 112, 18, Math.PI, Math.PI * 2), { orangeEvery: 4 });
+    } else if (name === 'small arc') {
+      arc({ x: 310, y: 650 }, { x: 590, y: 650 }, { part: 'brick', type: 'orange' });
+      pegs(ellipse(450, 660, 195, 70, 11, Math.PI, Math.PI * 2), { orangeEvery: 5 });
+    } else if (name === 'double bowl') {
+      arc({ x: 120, y: 705 }, { x: 430, y: 705 }, { part: 'rail' });
+      arc({ x: 470, y: 705 }, { x: 780, y: 705 }, { part: 'rail' });
+      pegs([...ellipse(275, 700, 125, 86, 10, Math.PI, Math.PI * 2), ...ellipse(625, 700, 125, 86, 10, Math.PI, Math.PI * 2)], { orangeEvery: 4 });
+      objects.push({ kind: 'bumper', x: 450, y: 820, r: 28 });
+    } else if (name === 'orbit gate') {
+      circle({ x: 255, y: 475 }, { x: 545, y: 765 }, { part: 'rail' });
+      circle({ x: 365, y: 560 }, { x: 705, y: 900 }, { part: 'brick', type: 'blue' });
+      pegs(ellipse(450, 690, 220, 145, 22), { orangeEvery: 5, greenAt: [2, 14] });
+    } else if (name === 'pinball cup') {
+      arc({ x: 160, y: 890 }, { x: 450, y: 650 }, { part: 'rail' });
+      arc({ x: 450, y: 650 }, { x: 740, y: 890 }, { part: 'rail' });
+      pegs(line({ x: 230, y: 570 }, { x: 680, y: 570 }, 10), { orangeEvery: 3 });
+      objects.push({ kind: 'bumper', x: 305, y: 725, r: 32 }, { kind: 'bumper', x: 595, y: 725, r: 32 });
+    } else if (name === 'rail funnel') {
+      bezier({ x: 95, y: 530 }, { x: 390, y: 930 }, { part: 'rail' });
+      bezier({ x: 805, y: 530 }, { x: 510, y: 930 }, { part: 'rail' });
+      pegs(ellipse(450, 620, 260, 80, 15, Math.PI, Math.PI * 2), { orangeEvery: 3 });
+    } else if (name === 'target halo') {
+      circle({ x: 305, y: 535 }, { x: 595, y: 825 }, { part: 'brick', type: 'orange' });
+      pegs(ellipse(450, 680, 210, 210, 20), { orangeEvery: 4, purpleEvery: 10 });
+      objects.push({ kind: 'spinner', x: 450, y: 680, radius: 54, speed: 0.95, phase: 0 });
+    } else if (name === 'bumper crown') {
+      pegs(ellipse(450, 610, 310, 120, 18, Math.PI, Math.PI * 2), { orangeEvery: 4 });
+      [290, 390, 510, 610].forEach((x, index) => objects.push({ kind: 'bumper', x, y: 730 + (index % 2) * 44, r: 26 }));
+      arc({ x: 185, y: 835 }, { x: 715, y: 835 }, { part: 'rail' });
+    } else if (name === 'zigzag lane') {
+      [[130, 500], [300, 610], [130, 720], [300, 830], [130, 940]].forEach((point, index, arr) => {
+        if (index < arr.length - 1) arc({ x: point[0], y: point[1] }, { x: arr[index + 1][0], y: arr[index + 1][1] }, { part: 'brick', type: index % 2 ? 'blue' : 'orange' });
+      });
+      pegs(line({ x: 420, y: 520 }, { x: 740, y: 920 }, 11), { orangeEvery: 3 });
+    } else if (name === 'wave ladder') {
+      [515, 615, 715, 815].forEach((y, index) => {
+        bezier({ x: 140, y }, { x: 760, y: y + (index % 2 ? -48 : 48) }, { part: index % 2 ? 'brick' : 'rail', type: index % 2 ? 'blue' : undefined, segments: 34 });
+      });
+      pegs(line({ x: 205, y: 460 }, { x: 695, y: 950 }, 13), { orangeEvery: 4 });
+    } else if (name === 'spiral pocket') {
+      [0, 1, 2].forEach((index) => circle({ x: 325 - index * 34, y: 515 - index * 34 }, { x: 575 + index * 34, y: 765 + index * 34 }, { part: index === 2 ? 'rail' : 'brick', type: 'blue', segments: 38 + index * 8 }));
+      pegs(ellipse(450, 675, 90, 90, 10), { orangeEvery: 2, greenAt: [5] });
+    } else if (name === 'cross gate') {
+      arc({ x: 150, y: 520 }, { x: 750, y: 900 }, { part: 'brick', type: 'blue' });
+      arc({ x: 750, y: 520 }, { x: 150, y: 900 }, { part: 'rail' });
+      objects.push({ kind: 'timed', x: 450, y: 715, w: 210, h: 22, phase: 0, period: 2300 });
+      pegs(ellipse(450, 700, 290, 150, 16), { orangeEvery: 4 });
+    } else if (name === 'left scoop') {
+      arc({ x: 95, y: 880 }, { x: 520, y: 570 }, { part: 'rail' });
+      pegs(ellipse(300, 710, 175, 115, 14, Math.PI * 0.2, Math.PI * 1.55), { orangeEvery: 3 });
+      objects.push({ kind: 'bumper', x: 600, y: 760, r: 32 });
+    } else if (name === 'right scoop') {
+      arc({ x: 805, y: 880 }, { x: 380, y: 570 }, { part: 'rail' });
+      pegs(ellipse(600, 710, 175, 115, 14, Math.PI * 1.45, Math.PI * 2.8), { orangeEvery: 3 });
+      objects.push({ kind: 'bumper', x: 300, y: 760, r: 32 });
+    } else if (name === 'splitter lanes') {
+      bezier({ x: 450, y: 500 }, { x: 185, y: 895 }, { part: 'rail' });
+      bezier({ x: 450, y: 500 }, { x: 715, y: 895 }, { part: 'rail' });
+      pegs([...line({ x: 250, y: 560 }, { x: 250, y: 900 }, 8), ...line({ x: 650, y: 560 }, { x: 650, y: 900 }, 8)], { orangeEvery: 4 });
+    } else if (name === 'timed gate') {
+      pegs(ellipse(450, 605, 285, 80, 15, Math.PI, Math.PI * 2), { orangeEvery: 3 });
+      [560, 655, 750, 845].forEach((y, index) => objects.push({ kind: 'timed', x: 450, y, w: 270 - index * 28, h: 22, phase: index * 0.75, period: 2200 }));
+      arc({ x: 190, y: 950 }, { x: 710, y: 950 }, { part: 'rail' });
+    } else if (name === 'spinner orbit') {
+      pegs(ellipse(450, 710, 260, 160, 24), { orangeEvery: 5, purpleEvery: 12 });
+      objects.push({ kind: 'spinner', x: 320, y: 710, radius: 58, speed: 1.1, phase: 0.2 }, { kind: 'spinner', x: 580, y: 710, radius: 58, speed: -1.1, phase: 1.2 });
+      circle({ x: 265, y: 545 }, { x: 635, y: 915 }, { part: 'rail' });
+    } else if (name === 'peg smile') {
+      pegs(ellipse(450, 680, 260, 130, 18, 0.15, Math.PI - 0.15), { orangeEvery: 3 });
+      pegs([{ x: 340, y: 585 }, { x: 560, y: 585 }, { x: 450, y: 665 }], { orangeEvery: 1 });
+      arc({ x: 190, y: 820 }, { x: 710, y: 820 }, { part: 'rail' });
+    } else if (name === 'stair rails') {
+      [0, 1, 2, 3, 4].forEach((index) => {
+        const y = 520 + index * 86;
+        arc({ x: 150 + index * 70, y }, { x: 395 + index * 70, y: y + 42 }, { part: 'rail', segments: 14 });
+        pegs(line({ x: 485 - index * 42, y: y + 18 }, { x: 745 - index * 28, y: y + 58 }, 5), { orangeEvery: 3 });
+      });
+    } else if (name === 'final loop') {
+      circle({ x: 235, y: 475 }, { x: 665, y: 905 }, { part: 'rail' });
+      circle({ x: 315, y: 555 }, { x: 585, y: 825 }, { part: 'brick', type: 'blue' });
+      objects.push({ kind: 'spinner', x: 450, y: 690, radius: 74, speed: 1.2, phase: 0 }, { kind: 'timed', x: 450, y: 930, w: 235, h: 22, phase: 0.5, period: 2100 });
+      pegs(ellipse(450, 690, 145, 145, 18), { orangeEvery: 3, greenAt: [8] });
+    } else if (name === 'hourglass') {
+      bezier({ x: 165, y: 500 }, { x: 735, y: 920 }, { part: 'brick', type: 'blue' });
+      bezier({ x: 735, y: 500 }, { x: 165, y: 920 }, { part: 'brick', type: 'blue' });
+      pegs(ellipse(450, 710, 235, 190, 22), { orangeEvery: 4 });
+      objects.push({ kind: 'timed', x: 450, y: 710, w: 150, h: 22, phase: 0, period: 2000 });
+    } else if (name === 'comet tail') {
+      bezier({ x: 145, y: 560 }, { x: 740, y: 840 }, { part: 'rail' });
+      pegs([...ellipse(270, 610, 90, 60, 8), ...line({ x: 390, y: 675 }, { x: 735, y: 880 }, 10)], { orangeEvery: 3 });
+      objects.push({ kind: 'bumper', x: 240, y: 620, r: 34 });
+    } else if (name === 'shield wall') {
+      [520, 625, 730, 835].forEach((y, index) => arc({ x: 170 + index * 20, y }, { x: 730 - index * 20, y }, { part: index % 2 ? 'brick' : 'rail', type: 'blue', segments: 18 }));
+      pegs(line({ x: 220, y: 470 }, { x: 680, y: 470 }, 10), { orangeEvery: 3 });
+      objects.push({ kind: 'timed', x: 450, y: 940, w: 320, h: 22, phase: 1, period: 2600 });
+    } else if (name === 'bounce garden') {
+      pegs(ellipse(450, 680, 315, 210, 28), { orangeEvery: 5, greenAt: [6, 21] });
+      [260, 380, 520, 640].forEach((x, index) => objects.push({ kind: 'bumper', x, y: 665 + (index % 2) * 95, r: 25 + index }));
+    } else if (name === 'dual funnels') {
+      arc({ x: 105, y: 575 }, { x: 415, y: 895 }, { part: 'rail' });
+      arc({ x: 795, y: 575 }, { x: 485, y: 895 }, { part: 'rail' });
+      arc({ x: 205, y: 500 }, { x: 695, y: 500 }, { part: 'brick', type: 'orange', segments: 22 });
+      pegs(ellipse(450, 720, 220, 110, 14, Math.PI, Math.PI * 2), { orangeEvery: 4 });
+    } else if (name === 'timing ribbon') {
+      bezier({ x: 105, y: 590 }, { x: 795, y: 590 }, { part: 'brick', type: 'blue', segments: 42 });
+      bezier({ x: 795, y: 820 }, { x: 105, y: 820 }, { part: 'rail', segments: 42 });
+      [310, 450, 590].forEach((x, index) => objects.push({ kind: 'timed', x, y: 705, w: 105, h: 22, phase: index * 0.85, period: 1900 }));
+      pegs(line({ x: 180, y: 500 }, { x: 720, y: 930 }, 13), { orangeEvery: 4 });
+    } else {
+      arc({ x: 160, y: 780 }, { x: 740, y: 780 }, { part: 'brick', type: 'blue' });
+      pegs(ellipse(450, 735, 250, 105, 18, Math.PI, Math.PI * 2), { orangeEvery: 4, greenAt: [9] });
+    }
+
+    return objects.slice(0, 180);
+  }
+
   curvePresetDefinition() {
     const name = EDITOR_CURVE_PRESETS[this.editorState.curvePresetIndex] ?? 'bowl';
-    const center = { x: WIDTH / 2, y: 670 };
-    if (name === 'ring') return { name, mode: 'circle', start: { x: 230, y: 420 }, end: { x: 670, y: 860 } };
-    if (name === 'snake') return { name, mode: 'bezier', start: { x: 120, y: 540 }, end: { x: 790, y: 880 } };
-    if (name === 's-curve') return { name, mode: 'bezier', start: { x: 140, y: 880 }, end: { x: 780, y: 470 } };
-    if (name === 'wide arc') return { name, mode: 'arc', start: { x: 120, y: 760 }, end: { x: 790, y: 760 } };
-    if (name === 'small arc') return { name, mode: 'arc', start: { x: 310, y: 650 }, end: { x: 590, y: 650 } };
-    return { name, mode: 'arc', start: { x: center.x - 290, y: center.y + 110 }, end: { x: center.x + 290, y: center.y + 110 } };
+    return { name, objects: this.templatePresetObjects(name) };
   }
 
   applyCurvePreset() {
     const preset = this.curvePresetDefinition();
-    this.editorState.curveMode = preset.mode;
-    const objects = this.manualCurveObjects(preset.start, preset.end);
+    const objects = preset.objects;
     if (!objects.length) return;
     this.setManualObjectsWithSelection(objects);
     this.editorState.curvePresetIndex = (this.editorState.curvePresetIndex + 1) % EDITOR_CURVE_PRESETS.length;
@@ -3686,3 +3892,4 @@ const game = new Phaser.Game({
 window.pegFanGame = game;
 window.pegFanGenerateLevel = generateLevel;
 window.pegFanEvaluateLevel = evaluateLevelDesign;
+window.pegFanEditorPresets = EDITOR_CURVE_PRESETS;
