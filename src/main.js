@@ -726,6 +726,7 @@ class PegFanScene extends Phaser.Scene {
   }
 
   playSfx(key, config = {}) {
+    if (this.qaFastMode) return;
     try {
       this.sound.play(`sfx-${key}`, { volume: 0.72, ...config });
     } catch {
@@ -3335,6 +3336,7 @@ class PegFanScene extends Phaser.Scene {
   }
 
   flashLaunch() {
+    if (this.qaFastMode) return;
     const ring = this.add.circle(
       CANNON_X + this.currentAim.x * 76,
       CANNON_Y + this.currentAim.y * 76,
@@ -3353,6 +3355,7 @@ class PegFanScene extends Phaser.Scene {
   }
 
   burst(x, y, color = COLORS.gold) {
+    if (this.qaFastMode) return;
     for (let i = 0; i < 8; i += 1) {
       const angle = (i / 8) * Math.PI * 2;
       const dot = this.add.circle(x, y, 4, color, 0.86);
@@ -3370,6 +3373,7 @@ class PegFanScene extends Phaser.Scene {
   }
 
   popText(x, y, label, color = '#ffd35a') {
+    if (this.qaFastMode) return;
     const text = this.add.text(x, y, label, {
       fontFamily: 'Verdana',
       fontSize: 22,
@@ -3387,6 +3391,7 @@ class PegFanScene extends Phaser.Scene {
   }
 
   showComboBanner(combo) {
+    if (this.qaFastMode) return;
     if (combo < 4 || combo % 2 !== 0) return;
     const text = this.add.text(WIDTH / 2, 314, `${combo} HIT FEVER`, {
       fontFamily: 'Verdana',
@@ -3408,6 +3413,7 @@ class PegFanScene extends Phaser.Scene {
   }
 
   showLastOrangeBanner(targets) {
+    if (this.qaFastMode) return;
     if (this.lastOrangeAnnounced || this.targetsLeft !== 1 || this.orangeClearPending) return;
     this.lastOrangeAnnounced = true;
     this.playSfx('combo', { volume: 0.78, detune: 900 });
@@ -3443,6 +3449,7 @@ class PegFanScene extends Phaser.Scene {
   }
 
   pulseRemainingOrange() {
+    if (this.qaFastMode) return;
     if (this.targetsLeft > 3 || this.orangeClearPending) return;
     const targets = [
       ...this.pegGroup.getChildren().filter((peg) => peg.active && peg.pegType === 'orange' && !peg.hit),
@@ -3576,6 +3583,10 @@ class PegFanScene extends Phaser.Scene {
     this.orangeClearCombo = this.shotCombo;
     this.playSfx('clear', { volume: 0.86 });
     this.refreshHud();
+    if (this.qaFastMode) {
+      if (this.inFlight === 0) this.finishPendingClear();
+      return;
+    }
     const flash = this.add.rectangle(WIDTH / 2, HEIGHT / 2, WIDTH, HEIGHT, COLORS.gold, 0.18).setDepth(34);
     this.tweens.add({ targets: flash, alpha: 0, duration: 420, onComplete: () => flash.destroy() });
     const banner = this.add.container(WIDTH / 2, 238).setDepth(35);
@@ -3620,6 +3631,7 @@ class PegFanScene extends Phaser.Scene {
     if (total <= 0) return 0;
     this.score += total;
     this.refreshHud();
+    if (this.qaFastMode) return total;
     const panel = this.add.container(WIDTH / 2, 378).setDepth(38);
     panel.add(this.add.rectangle(0, 0, 470, 116, 0x0b111b, 0.9).setStrokeStyle(3, COLORS.gold, 0.9));
     panel.add(this.add.text(0, -30, 'CLEAR BONUS', {
@@ -3667,6 +3679,7 @@ class PegFanScene extends Phaser.Scene {
     }
     this.recordQaRun('clear');
     if (!this.orangeClearAnnounced) this.playSfx('clear', { volume: 0.82 });
+    if (this.qaFastMode) return;
     this.time.delayedCall(clearBonus > 0 ? 1050 : 550, () => this.showResult(true));
   }
 
@@ -3675,6 +3688,7 @@ class PegFanScene extends Phaser.Scene {
     this.levelFailed = true;
     this.recordQaRun('fail');
     this.playSfx('fail', { volume: 0.72 });
+    if (this.qaFastMode) return;
     this.time.delayedCall(450, () => this.showResult(false));
   }
 
@@ -4024,6 +4038,15 @@ window.pegFanDebug = {
   },
   muteAudio(muted = true) {
     game.sound.mute = muted;
+  },
+  setQaFastMode(enabled = true, speed = 4) {
+    const scene = this.scene();
+    scene.qaFastMode = enabled;
+    scene.qaSpeedScale = enabled ? Phaser.Math.Clamp(Number(speed) || 4, 1, 12) : 1;
+    scene.time.timeScale = scene.qaSpeedScale;
+    if (scene.matter?.world?.engine?.timing) scene.matter.world.engine.timing.timeScale = scene.qaSpeedScale;
+    game.loop.targetFps = enabled ? 120 : 60;
+    return { enabled: scene.qaFastMode, speed: scene.qaSpeedScale };
   },
   clone(value) {
     return JSON.parse(JSON.stringify(value));

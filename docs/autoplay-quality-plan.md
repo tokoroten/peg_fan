@@ -48,6 +48,8 @@ The first implementation is available as `npm run qa:auto`.
 - Default mode is a fast smoke audit for early levels. It writes reports but does not fail CI on stage-quality rejects.
 - Full mode is available with `QA_AUTO_FULL=1 npm run qa:auto`. It runs levels `1-100`, samples more shots, repeats moving stages, and fails on reject flags.
 - Narrow runs can use `QA_AUTO_LEVELS=12,18-24 npm run qa:auto`.
+- Monte Carlo settings can be tuned with `QA_AUTO_TRIALS`, `QA_AUTO_WORKERS`, `QA_AUTO_MAX_BALLS`, and `QA_AUTO_SEED`.
+- Headless fast mode is on by default. Use `QA_AUTO_FAST_SCALE=8` to adjust the physics time scale or `QA_AUTO_FAST=0` to compare against normal speed.
 - Saved editor slots can be targeted with `QA_AUTO_SOURCE=editor-slots npm run qa:auto` when the Playwright browser context contains editor slot data.
 - The browser exposes `window.pegFanDebug` for loading stages, launching exact angles, waiting for settled balls, and reading score/target snapshots.
 

@@ -1,4 +1,5 @@
 import { chromium } from '@playwright/test';
+import { cpus } from 'node:os';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import process from 'node:process';
@@ -13,11 +14,13 @@ const FULL = process.env.QA_AUTO_FULL === '1';
 const STRICT = process.env.QA_AUTO_STRICT === '1' || FULL;
 const SOURCE = process.env.QA_AUTO_SOURCE ?? 'bundled';
 const LEVEL_SPEC = process.env.QA_AUTO_LEVELS ?? (FULL ? '1-100' : '1-3');
-const CANDIDATE_COUNT = Number(process.env.QA_AUTO_CANDIDATES ?? (FULL ? 25 : 5));
-const POLICY_COUNT = Number(process.env.QA_AUTO_POLICIES ?? (FULL ? 5 : 1));
-const REPEAT_MOVING = Number(process.env.QA_AUTO_REPEAT_MOVING ?? (FULL ? 3 : 1));
-const MAX_BALLS = Number(process.env.QA_AUTO_MAX_BALLS ?? (FULL ? 18 : 3));
-const SHOT_TIMEOUT_MS = Number(process.env.QA_AUTO_SHOT_TIMEOUT_MS ?? (FULL ? 6500 : 4200));
+const WORKERS = Math.max(1, Number(process.env.QA_AUTO_WORKERS ?? Math.min(FULL ? 8 : 3, cpus().length || 1)));
+const TRIALS = Math.max(1, Number(process.env.QA_AUTO_TRIALS ?? (FULL ? 600 : 12)));
+const MAX_BALLS = Math.max(1, Number(process.env.QA_AUTO_MAX_BALLS ?? (FULL ? 18 : 4)));
+const SHOT_TIMEOUT_MS = Number(process.env.QA_AUTO_SHOT_TIMEOUT_MS ?? (FULL ? 3600 : 2200));
+const FAST_MODE = process.env.QA_AUTO_FAST !== '0';
+const FAST_SCALE = Number(process.env.QA_AUTO_FAST_SCALE ?? (FULL ? 8 : 6));
+const BASE_SEED = Number(process.env.QA_AUTO_SEED ?? 1729);
 
 function parseLevels(spec) {
   const levels = new Set();
@@ -75,70 +78,118 @@ function startPreview() {
   return child;
 }
 
-function candidateAngles(min, max, count) {
-  return Array.from({ length: count }, (_, index) => {
-    const t = count === 1 ? 0.5 : index / (count - 1);
-    return min + (max - min) * t;
-  });
+function createRng(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    return state / 0x100000000;
+  };
 }
 
 function quantile(values, q) {
-  if (!values.length) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const index = Math.min(sorted.length - 1, Math.max(0, Math.floor((sorted.length - 1) * q)));
-  return sorted[index];
+  const finite = values.filter(Number.isFinite).sort((a, b) => a - b);
+  if (!finite.length) return null;
+  const index = Math.min(finite.length - 1, Math.max(0, Math.floor((finite.length - 1) * q)));
+  return finite[index];
 }
 
-function analyzeLevel(levelNumber, levelInfo, singles, policies) {
-  const successful = policies.filter((policy) => policy.cleared);
-  const allShots = [
-    ...singles.map((single) => single.shot),
-    ...policies.flatMap((policy) => policy.shots),
-  ].filter(Boolean);
-  const scores = policies.map((policy) => policy.score);
-  const deadShots = singles.filter((single) => single.shot.targetsCleared === 0 && single.shot.scoreGain < 150).length;
+function mean(values) {
+  const finite = values.filter(Number.isFinite);
+  return finite.length ? finite.reduce((sum, value) => sum + value, 0) / finite.length : null;
+}
+
+function makeAnglePlan({ minAngle, maxAngle, levelNumber, trialIndex, maxBalls }) {
+  const rng = createRng(BASE_SEED + levelNumber * 100003 + trialIndex * 9176);
+  const plan = [];
+  const center = (minAngle + maxAngle) / 2;
+  const width = maxAngle - minAngle;
+  for (let shot = 0; shot < maxBalls; shot += 1) {
+    const mode = rng();
+    let angle;
+    if (mode < 0.52) {
+      angle = minAngle + width * rng();
+    } else if (mode < 0.78) {
+      const lane = Math.floor(rng() * 9);
+      angle = minAngle + width * (lane / 8) + (rng() - 0.5) * 0.09;
+    } else {
+      angle = center + (rng() - 0.5) * width * 0.42;
+    }
+    plan.push(Math.max(minAngle, Math.min(maxAngle, angle)));
+  }
+  return plan;
+}
+
+function difficultyLabel(metrics) {
+  if (metrics.clearRate <= 0.05) return 'BROKEN';
+  if (metrics.clearRate <= 0.15) return 'EXPERT';
+  if (metrics.clearRate <= 0.35) return 'HARD';
+  if (metrics.clearRate <= 0.65) return 'NORMAL';
+  if (metrics.medianBallsToClear !== null && metrics.medianBallsToClear <= metrics.startBalls * 0.45) return 'TUTORIAL';
+  return 'EASY';
+}
+
+function analyzeLevel(target, levelInfo, trials, elapsedMs) {
+  const successful = trials.filter((trial) => trial.cleared);
+  const allShots = trials.flatMap((trial) => trial.shots).filter(Boolean);
+  const deadShots = allShots.filter((shot) => shot.targetsCleared === 0 && shot.scoreGain < 150).length;
   const stuckShots = allShots.filter((shot) => shot.stuckNudges > 2).length;
   const timedOutShots = allShots.filter((shot) => shot.timedOut).length;
   const caughtShots = allShots.filter((shot) => shot.caught).length;
   const gimmickShots = allShots.filter((shot) => shot.gimmickHits > 0).length;
   const firstHits = new Set(allShots.map((shot) => shot.firstHit).filter(Boolean));
-  const targetOrders = new Set(policies.map((policy) => policy.targetOrder.join('>')).filter(Boolean));
+  const targetOrders = new Set(trials.map((trial) => trial.targetOrder.join('>')).filter(Boolean));
+  const ballsToClear = successful.map((trial) => trial.shotsFired);
+  const targetsCleared = trials.map((trial) => trial.targetsCleared);
+  const scores = trials.map((trial) => trial.score);
   const metrics = {
-    clearRate: policies.length ? successful.length / policies.length : 0,
-    medianBallsToClear: successful.length ? quantile(successful.map((policy) => policy.shotsFired), 0.5) : null,
-    targetProgress: singles.length ? singles.reduce((sum, single) => sum + single.shot.targetsCleared, 0) / singles.length : 0,
-    deadShotRate: singles.length ? deadShots / singles.length : 0,
+    startBalls: levelInfo.startBalls,
+    trials: trials.length,
+    clearRate: trials.length ? successful.length / trials.length : 0,
+    meanBallsToClear: mean(ballsToClear),
+    medianBallsToClear: quantile(ballsToClear, 0.5),
+    p90BallsToClear: quantile(ballsToClear, 0.9),
+    meanTargetsCleared: mean(targetsCleared) ?? 0,
+    p90TargetsCleared: quantile(targetsCleared, 0.9) ?? 0,
+    expectedTargetProgress: allShots.length ? allShots.reduce((sum, shot) => sum + shot.targetsCleared, 0) / allShots.length : 0,
+    deadShotRate: allShots.length ? deadShots / allShots.length : 0,
     stuckRate: allShots.length ? stuckShots / allShots.length : 0,
     timeoutRate: allShots.length ? timedOutShots / allShots.length : 0,
     catchRate: allShots.length ? caughtShots / allShots.length : 0,
     gimmickContactRate: allShots.length ? gimmickShots / allShots.length : 0,
     pathDiversity: firstHits.size + targetOrders.size,
     scoreSpread: {
-      low: quantile(scores, 0.1),
-      median: quantile(scores, 0.5),
-      high: quantile(scores, 0.9),
+      low: quantile(scores, 0.1) ?? 0,
+      median: quantile(scores, 0.5) ?? 0,
+      high: quantile(scores, 0.9) ?? 0,
     },
   };
+  metrics.difficulty = difficultyLabel(metrics);
+
   const flags = [];
+  const rejectFlag = (name) => flags.push(STRICT ? `REJECT_${name}` : `WARN_${name}`);
   const hasGimmicks = levelInfo.objects.rails + levelInfo.objects.timedBlocks + levelInfo.objects.spinners + levelInfo.objects.bumpers > 0;
-  if (metrics.clearRate === 0 && MAX_BALLS >= levelInfo.startBalls) flags.push('REJECT_NO_CLEAR');
+  if (metrics.clearRate === 0 && MAX_BALLS >= levelInfo.startBalls) rejectFlag('NO_CLEAR');
   else if (metrics.clearRate === 0) flags.push('WARN_NO_CLEAR_IN_BUDGET');
-  if (metrics.deadShotRate > 0.55) flags.push('REJECT_DEAD_SHOTS');
-  if (metrics.stuckRate > 0.03) flags.push('REJECT_STUCK');
+  if (metrics.deadShotRate > 0.55) rejectFlag('DEAD_SHOTS');
+  if (metrics.stuckRate > 0.03) rejectFlag('STUCK');
   if (metrics.timeoutRate > 0.25 && !STRICT) flags.push('WARN_LONG_SHOTS');
   if (hasGimmicks && metrics.gimmickContactRate < 0.15) flags.push('WARN_LOW_GIMMICK_CONTACT');
   if (metrics.pathDiversity < 4) flags.push('WARN_LOW_PATH_DIVERSITY');
-  if (metrics.medianBallsToClear !== null && metrics.medianBallsToClear < Math.max(2, Math.floor(levelInfo.startBalls * 0.3))) flags.push('WARN_TOO_EASY');
-  if (!policies.some((policy) => policy.targetsCleared >= Math.ceil(levelInfo.startTargets * 0.7))) flags.push('WARN_LOW_TARGET_REACH');
+  if (metrics.clearRate > 0.7 && metrics.medianBallsToClear !== null && metrics.medianBallsToClear < Math.max(2, Math.floor(levelInfo.startBalls * 0.3))) flags.push('WARN_TOO_EASY');
+  if (metrics.p90TargetsCleared < Math.ceil(levelInfo.startTargets * 0.7)) flags.push('WARN_LOW_TARGET_REACH');
+
   return {
-    level: levelNumber,
+    id: target.id,
+    label: target.label,
+    level: target.levelNumber,
     objects: levelInfo.objects,
     startBalls: levelInfo.startBalls,
     startTargets: levelInfo.startTargets,
+    elapsedMs,
     metrics,
     flags,
-    singles,
-    policies,
+    bestTrials: [...trials].sort((a, b) => b.targetsCleared - a.targetsCleared || b.score - a.score).slice(0, 6),
+    trials,
   };
 }
 
@@ -147,10 +198,14 @@ function markdownSummary(report) {
   const warned = report.levels.filter((level) => !level.flags.some((flag) => flag.startsWith('REJECT')) && level.flags.length);
   const passed = report.levels.filter((level) => !level.flags.length);
   const lines = [
-    '# Autoplay QA Summary',
+    '# Autoplay Monte Carlo QA Summary',
     '',
     `Generated: ${report.generatedAt}`,
+    `Source: ${report.config.source}`,
     `Levels: ${report.levels.length}`,
+    `Trials per level: ${report.config.trials}`,
+    `Workers: ${report.config.workers}`,
+    `Fast mode: ${report.config.fastMode ? `${report.config.fastScale}x` : 'off'}`,
     `Rejected: ${rejected.length}`,
     `Warned: ${warned.length}`,
     `Passed: ${passed.length}`,
@@ -160,60 +215,10 @@ function markdownSummary(report) {
   ];
   report.levels.forEach((level) => {
     const m = level.metrics;
-    lines.push(`- ${level.label ?? `L${String(level.level).padStart(3, '0')}`} clear ${(m.clearRate * 100).toFixed(0)}% dead ${(m.deadShotRate * 100).toFixed(0)}% stuck ${(m.stuckRate * 100).toFixed(0)}% timeout ${(m.timeoutRate * 100).toFixed(0)}% gimmick ${(m.gimmickContactRate * 100).toFixed(0)}% diversity ${m.pathDiversity} ${level.flags.join(',') || 'PASS'}`);
+    const balls = m.medianBallsToClear === null ? '-' : `${m.medianBallsToClear}/${m.p90BallsToClear}`;
+    lines.push(`- ${level.label} ${m.difficulty} clear ${(m.clearRate * 100).toFixed(1)}% balls med/p90 ${balls} dead ${(m.deadShotRate * 100).toFixed(0)}% timeout ${(m.timeoutRate * 100).toFixed(0)}% gimmick ${(m.gimmickContactRate * 100).toFixed(0)}% diversity ${m.pathDiversity} ${level.flags.join(',') || 'PASS'}`);
   });
   return `${lines.join('\n')}\n`;
-}
-
-async function runSingleShot(page, target, angle) {
-  return page.evaluate(async ({ target, angle, timeout }) => {
-    window.pegFanDebug.loadLevel(target.levelNumber, target.levelOverride);
-    window.pegFanDebug.launchAngle(angle);
-    const snapshot = await window.pegFanDebug.waitForShot(timeout);
-    return {
-      angle,
-      shot: snapshot.lastShot,
-      score: snapshot.score,
-      targetsLeft: snapshot.targetsLeft,
-    };
-  }, { target, angle, timeout: SHOT_TIMEOUT_MS });
-}
-
-async function runPolicy(page, target, baseAngle, repeatIndex) {
-  return page.evaluate(async ({ target, baseAngle, repeatIndex, maxBalls, timeout, minAngle, maxAngle }) => {
-    const first = window.pegFanDebug.loadLevel(target.levelNumber, target.levelOverride);
-    const offsets = [0, -0.045, 0.045, -0.09, 0.09, -0.135, 0.135];
-    const shots = [];
-    while (!window.pegFanDebug.snapshot().levelCleared && !window.pegFanDebug.snapshot().levelFailed && shots.length < Math.min(maxBalls, first.startBalls)) {
-      const angle = Math.max(minAngle, Math.min(maxAngle, baseAngle + offsets[(shots.length + repeatIndex) % offsets.length]));
-      const launched = window.pegFanDebug.launchAngle(angle);
-      if (!launched) break;
-      const snapshot = await window.pegFanDebug.waitForShot(timeout);
-      if (snapshot.lastShot) shots.push(snapshot.lastShot);
-      if (snapshot.levelCleared || snapshot.levelFailed) break;
-    }
-    const final = window.pegFanDebug.snapshot();
-    return {
-      baseAngle,
-      repeatIndex,
-      cleared: final.levelCleared,
-      failed: final.levelFailed,
-      score: final.score,
-      targetsLeft: final.targetsLeft,
-      targetsCleared: Math.max(0, final.startTargets - final.targetsLeft),
-      shotsFired: shots.length,
-      targetOrder: shots.flatMap((shot) => shot.targetOrder ?? []),
-      shots,
-    };
-  }, {
-    target,
-    baseAngle,
-    repeatIndex,
-    maxBalls: MAX_BALLS,
-    timeout: SHOT_TIMEOUT_MS,
-    minAngle: 0.28,
-    maxAngle: Math.PI - 0.28,
-  });
 }
 
 async function collectTargets(page, levels) {
@@ -237,6 +242,87 @@ async function collectTargets(page, levels) {
   }));
 }
 
+async function preparePage(browser, pageErrors) {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 1300 }, deviceScaleFactor: 1 });
+  const page = await context.newPage();
+  page.on('pageerror', (error) => pageErrors.push(String(error.stack || error.message || error)));
+  page.on('console', (message) => {
+    if (message.type() === 'error') pageErrors.push(message.text());
+  });
+  await page.goto(BASE_URL, { waitUntil: 'networkidle' });
+  await page.waitForFunction(() => window.pegFanDebug?.scene?.());
+  await page.evaluate(({ fastMode, fastScale }) => {
+    window.pegFanDebug.muteAudio(true);
+    window.pegFanDebug.setQaFastMode(fastMode, fastScale);
+  }, { fastMode: FAST_MODE, fastScale: FAST_SCALE });
+  return { context, page };
+}
+
+async function runTrial(page, target, anglePlan, trialIndex) {
+  return page.evaluate(async ({ target, anglePlan, trialIndex, timeout }) => {
+    const first = window.pegFanDebug.loadLevel(target.levelNumber, target.levelOverride);
+    const shots = [];
+    for (const angle of anglePlan.slice(0, Math.min(anglePlan.length, first.startBalls))) {
+      const snapshotBefore = window.pegFanDebug.snapshot();
+      if (snapshotBefore.levelCleared || snapshotBefore.levelFailed) break;
+      const launched = window.pegFanDebug.launchAngle(angle);
+      if (!launched) break;
+      const snapshot = await window.pegFanDebug.waitForShot(timeout);
+      if (snapshot.lastShot) shots.push(snapshot.lastShot);
+      if (snapshot.levelCleared || snapshot.levelFailed) break;
+    }
+    const final = window.pegFanDebug.snapshot();
+    return {
+      trialIndex,
+      angles: anglePlan.slice(0, shots.length),
+      cleared: final.levelCleared,
+      failed: final.levelFailed,
+      score: final.score,
+      targetsLeft: final.targetsLeft,
+      targetsCleared: Math.max(0, final.startTargets - final.targetsLeft),
+      shotsFired: shots.length,
+      targetOrder: shots.flatMap((shot) => shot.targetOrder ?? []),
+      shots,
+    };
+  }, { target, anglePlan, trialIndex, timeout: SHOT_TIMEOUT_MS });
+}
+
+async function evaluateTarget(page, constants, target) {
+  const startedAt = Date.now();
+  const levelInfo = await page.evaluate((targetValue) => window.pegFanDebug.loadLevel(targetValue.levelNumber, targetValue.levelOverride), target);
+  const maxBalls = Math.min(MAX_BALLS, levelInfo.startBalls);
+  const trials = [];
+  for (let index = 0; index < TRIALS; index += 1) {
+    const anglePlan = makeAnglePlan({
+      minAngle: constants.minAimAngle,
+      maxAngle: constants.maxAimAngle,
+      levelNumber: target.levelNumber,
+      trialIndex: index,
+      maxBalls,
+    });
+    trials.push(await runTrial(page, target, anglePlan, index));
+  }
+  return analyzeLevel(target, levelInfo, trials, Date.now() - startedAt);
+}
+
+async function workerLoop(browser, constants, queue, pageErrors, workerIndex) {
+  const { context, page } = await preparePage(browser, pageErrors);
+  const reports = [];
+  try {
+    while (queue.length) {
+      const target = queue.shift();
+      if (!target) break;
+      const report = await evaluateTarget(page, constants, target);
+      reports.push(report);
+      const m = report.metrics;
+      console.log(`W${workerIndex} ${target.label} ${m.difficulty} clear=${(m.clearRate * 100).toFixed(1)}% med=${m.medianBallsToClear ?? '-'} p90=${m.p90BallsToClear ?? '-'} dead=${(m.deadShotRate * 100).toFixed(0)}% ${report.flags.join(',') || 'PASS'}`);
+    }
+  } finally {
+    await context.close();
+  }
+  return reports;
+}
+
 async function run() {
   const levels = parseLevels(LEVEL_SPEC);
   if (!levels.length) throw new Error(`No valid levels in QA_AUTO_LEVELS=${LEVEL_SPEC}`);
@@ -246,62 +332,36 @@ async function run() {
   try {
     await waitForServer(BASE_URL);
     browser = await chromium.launch({ headless: true });
-    const page = await browser.newPage({ viewport: { width: 1280, height: 1300 }, deviceScaleFactor: 1 });
     const pageErrors = [];
-    page.on('pageerror', (error) => pageErrors.push(String(error.stack || error.message || error)));
-    page.on('console', (message) => {
-      if (message.type() === 'error') pageErrors.push(message.text());
-    });
-    await page.goto(BASE_URL, { waitUntil: 'networkidle' });
-    await page.waitForFunction(() => window.pegFanDebug?.scene?.());
-    await page.evaluate(() => window.pegFanDebug.muteAudio(true));
-    const constants = await page.evaluate(() => window.pegFanDebug.constants);
-    const angles = candidateAngles(constants.minAimAngle, constants.maxAimAngle, CANDIDATE_COUNT);
+    const bootstrap = await preparePage(browser, pageErrors);
+    const constants = await bootstrap.page.evaluate(() => window.pegFanDebug.constants);
+    const targets = await collectTargets(bootstrap.page, levels);
+    await bootstrap.context.close();
+    if (!targets.length) console.log(`No QA targets found for source ${SOURCE}`);
 
-    const targets = await collectTargets(page, levels);
-    if (!targets.length) {
-      console.log(`No QA targets found for source ${SOURCE}`);
-    }
+    const queue = [...targets];
+    const workerCount = Math.min(WORKERS, Math.max(1, queue.length));
+    const workerResults = await Promise.all(Array.from({ length: workerCount }, (_, index) => workerLoop(browser, constants, queue, pageErrors, index + 1)));
+    const levelReports = workerResults.flat().sort((a, b) => a.level - b.level || a.id.localeCompare(b.id));
 
-    const levelReports = [];
-    for (const target of targets) {
-      const levelInfo = await page.evaluate((targetValue) => window.pegFanDebug.loadLevel(targetValue.levelNumber, targetValue.levelOverride), target);
-      const singles = [];
-      for (const angle of angles) {
-        singles.push(await runSingleShot(page, target, angle));
-      }
-      const bestAngles = [...singles]
-        .sort((a, b) => ((b.shot?.targetsCleared ?? 0) * 10000 + (b.shot?.scoreGain ?? 0)) - ((a.shot?.targetsCleared ?? 0) * 10000 + (a.shot?.scoreGain ?? 0)))
-        .slice(0, POLICY_COUNT)
-        .map((single) => single.angle);
-      const hasMoving = levelInfo.objects.timedBlocks + levelInfo.objects.spinners > 0;
-      const repeats = hasMoving ? REPEAT_MOVING : 1;
-      const policies = [];
-      for (const angle of bestAngles) {
-        for (let repeat = 0; repeat < repeats; repeat += 1) {
-          policies.push(await runPolicy(page, target, angle, repeat));
-        }
-      }
-      const report = analyzeLevel(target.levelNumber, levelInfo, singles, policies);
-      report.id = target.id;
-      report.label = target.label;
-      levelReports.push(report);
-      const m = report.metrics;
-      console.log(`${target.label} clear=${(m.clearRate * 100).toFixed(0)}% dead=${(m.deadShotRate * 100).toFixed(0)}% stuck=${(m.stuckRate * 100).toFixed(0)}% timeout=${(m.timeoutRate * 100).toFixed(0)}% ${report.flags.join(',') || 'PASS'}`);
-    }
+    const screenshotPage = await preparePage(browser, pageErrors);
+    if (targets[0]) await screenshotPage.page.evaluate((target) => window.pegFanDebug.loadLevel(target.levelNumber, target.levelOverride), targets[0]);
+    await screenshotPage.page.screenshot({ path: SCREENSHOT_PATH, fullPage: true });
+    await screenshotPage.context.close();
 
-    await page.screenshot({ path: SCREENSHOT_PATH, fullPage: true });
     const report = {
       generatedAt: new Date().toISOString(),
       config: {
         levels: LEVEL_SPEC,
         source: SOURCE,
-        candidateCount: CANDIDATE_COUNT,
-        policyCount: POLICY_COUNT,
-        repeatMoving: REPEAT_MOVING,
+        workers: workerCount,
+        trials: TRIALS,
         maxBalls: MAX_BALLS,
         shotTimeoutMs: SHOT_TIMEOUT_MS,
+        fastMode: FAST_MODE,
+        fastScale: FAST_SCALE,
         strict: STRICT,
+        seed: BASE_SEED,
       },
       pageErrors,
       levels: levelReports,
