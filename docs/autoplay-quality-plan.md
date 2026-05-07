@@ -41,9 +41,14 @@ The future `npm run qa:auto` command should write:
 - A compact Markdown summary grouped by reject, warn, and pass.
 - A screenshot overlay for rejected stages showing the best and worst sampled aim lines.
 
-## First Implementation Scope
+## Implementation
 
-1. Add a Playwright script that loads a single stage and fires scripted aim angles.
-2. Export browser-side debug hooks for stage load, shot launch, ball-settled detection, and score snapshot.
-3. Run the audit against edited localStorage stages first, then expand to all 100 bundled stages.
-4. Add the command to GitHub Actions after runtime is below roughly 10 minutes.
+The first implementation is available as `npm run qa:auto`.
+
+- Default mode is a fast smoke audit for early levels. It writes reports but does not fail CI on stage-quality rejects.
+- Full mode is available with `QA_AUTO_FULL=1 npm run qa:auto`. It runs levels `1-100`, samples more shots, repeats moving stages, and fails on reject flags.
+- Narrow runs can use `QA_AUTO_LEVELS=12,18-24 npm run qa:auto`.
+- Saved editor slots can be targeted with `QA_AUTO_SOURCE=editor-slots npm run qa:auto` when the Playwright browser context contains editor slot data.
+- The browser exposes `window.pegFanDebug` for loading stages, launching exact angles, waiting for settled balls, and reading score/target snapshots.
+
+GitHub Actions runs the smoke audit after build, static stage audit, and curve physics QA. The full 100-stage audit is intentionally opt-in until runtime is low enough for every push.

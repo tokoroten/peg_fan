@@ -46,11 +46,14 @@ jobs:
       - name: Curve physics QA
         run: npm run qa:curves
 
-      - name: Upload curve QA report
+      - name: Autoplay smoke QA
+        run: npm run qa:auto
+
+      - name: Upload QA reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: curve-qa-results
+          name: qa-results
           path: qa-results
           if-no-files-found: ignore
 

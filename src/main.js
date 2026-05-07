@@ -2787,6 +2787,7 @@ class PegFanScene extends Phaser.Scene {
     this.multiballQueued = false;
     this.rewardedContinuesUsed = 0;
     this.levelCleared = false;
+    this.levelFailed = false;
     this.orangeClearPending = false;
     this.orangeClearAnnounced = false;
     this.lastOrangeAnnounced = false;
@@ -2804,6 +2805,9 @@ class PegFanScene extends Phaser.Scene {
     };
     this.shotCombo = 0;
     this.currentAim = { x: 0, y: 1 };
+    this.nextQaObjectId = 1;
+    this.qaShot = null;
+    this.qaCompletedShots = [];
 
     this.addBackground(this.level.editorTest ? 'EDITOR TEST' : `LEVEL ${levelNumber}`);
     this.createAimControls();
@@ -2876,6 +2880,12 @@ class PegFanScene extends Phaser.Scene {
     return gameObject;
   }
 
+  assignQaObject(gameObject, prefix) {
+    gameObject.qaId = `${prefix}-${this.nextQaObjectId ?? 0}`;
+    this.nextQaObjectId = (this.nextQaObjectId ?? 0) + 1;
+    return gameObject;
+  }
+
   makeMatterCircle(gameObject, radius, bodyRole, options = {}, extra = {}) {
     this.matter.add.gameObject(gameObject, {
       shape: { type: 'circle', radius },
@@ -2929,6 +2939,7 @@ class PegFanScene extends Phaser.Scene {
       const ball = a.bodyRole === 'ball' ? a : b.bodyRole === 'ball' ? b : null;
       const other = ball === a ? b : a;
       if (!ball || !other || ball.caught) return;
+      this.recordQaCollision(other);
 
       if (other.bodyRole === 'peg' || other.bodyRole === 'brick') {
         this.hitPeg(ball, other);
@@ -2945,6 +2956,7 @@ class PegFanScene extends Phaser.Scene {
     this.level.pegs.forEach((data) => {
       const color = data.type === 'orange' ? COLORS.orange : data.type === 'green' ? COLORS.green : data.type === 'purple' ? COLORS.purple : COLORS.blue;
       const peg = this.add.circle(data.x, data.y, 13, color, 1).setStrokeStyle(4, 0xffffff, 0.28);
+      this.assignQaObject(peg, 'peg');
       peg.pegType = data.type;
       peg.value = data.type === 'orange' ? 300 : data.type === 'purple' ? 500 : data.type === 'green' ? 150 : 80;
       peg.motion = data.motion;
@@ -2965,6 +2977,7 @@ class PegFanScene extends Phaser.Scene {
       const color = data.type === 'orange' ? COLORS.orange : data.type === 'green' ? COLORS.green : COLORS.blue;
       const vertices = normalizeQuad(data);
       const visual = this.addQuadVisual({ vertices }, color, 1, 0xffffff, 0.28, 3);
+      this.assignQaObject(visual, 'brick');
       this.makeMatterPolygon(visual, vertices, 'brick', {
         isStatic: true,
         restitution: 1,
@@ -2982,6 +2995,7 @@ class PegFanScene extends Phaser.Scene {
     this.level.rails.forEach((data) => {
       const vertices = normalizeQuad(data);
       const visual = this.addQuadVisual({ vertices }, 0x8ea2c7, 0.35, 0xdbeafe, 0.45, 2);
+      this.assignQaObject(visual, 'rail');
       this.makeMatterPolygon(visual, vertices, 'rail', {
         isStatic: true,
         restitution: 1,
@@ -2995,6 +3009,7 @@ class PegFanScene extends Phaser.Scene {
     this.timedBlockGroup = this.add.group();
     this.level.timedBlocks.forEach((data) => {
       const block = this.add.rectangle(data.x, data.y, data.w, data.h, 0x38bdf8, 0.52).setStrokeStyle(2, 0xe0f2fe, 0.72);
+      this.assignQaObject(block, 'timed');
       block.period = data.period;
       block.phase = data.phase;
       block.baseAlpha = 0.52;
@@ -3011,6 +3026,7 @@ class PegFanScene extends Phaser.Scene {
     this.bumperGroup = this.add.group();
     this.level.bumpers.forEach((data) => {
       const bumper = this.add.circle(data.x, data.y, data.r, 0xe7eef8, 0.18).setStrokeStyle(5, COLORS.cyan, 0.72);
+      this.assignQaObject(bumper, 'bumper');
       this.makeMatterCircle(bumper, data.r, 'bumper', {
         isStatic: true,
         restitution: 1.15,
@@ -3029,6 +3045,7 @@ class PegFanScene extends Phaser.Scene {
       const a = this.add.circle(data.x + data.radius, data.y, 16, 0xfef08a, 0.9).setStrokeStyle(3, 0x8b6814);
       const b = this.add.circle(data.x - data.radius, data.y, 16, 0xfef08a, 0.9).setStrokeStyle(3, 0x8b6814);
       [hub, a, b].forEach((node) => {
+        this.assignQaObject(node, 'spinner');
         this.makeMatterCircle(node, node.radius ?? 12, 'spinner', {
           isStatic: true,
           restitution: 1.2,
@@ -3058,6 +3075,82 @@ class PegFanScene extends Phaser.Scene {
   refreshHud() {
     this.scoreText.setText(`SCORE ${this.score}   BALL ${this.shotsLeft}`);
     this.goalText.setText(`TARGET ${this.targetsLeft}`);
+  }
+
+  beginQaShot(angle) {
+    this.qaShot = {
+      angle,
+      startScore: this.score,
+      startTargets: this.targetsLeft,
+      startShotsLeft: this.shotsLeft,
+      firstHit: null,
+      targetOrder: [],
+      targetHits: 0,
+      gimmickHits: 0,
+      collisions: 0,
+      caught: false,
+      stuckNudges: 0,
+      maxSpeed: 0,
+      timedOut: false,
+    };
+  }
+
+  finishQaShot(reason = 'idle') {
+    if (!this.qaShot) return null;
+    const shot = {
+      ...this.qaShot,
+      reason,
+      endScore: this.score,
+      endTargets: this.targetsLeft,
+      endShotsLeft: this.shotsLeft,
+      scoreGain: this.score - this.qaShot.startScore,
+      targetsCleared: Math.max(0, this.qaShot.startTargets - this.targetsLeft),
+    };
+    this.qaCompletedShots.push(shot);
+    this.qaShot = null;
+    return shot;
+  }
+
+  recordQaCollision(other) {
+    if (!this.qaShot) return;
+    this.qaShot.collisions += 1;
+    const id = other.qaId ?? other.bodyRole ?? 'unknown';
+    if (!this.qaShot.firstHit) this.qaShot.firstHit = id;
+    if (['rail', 'timedBlock', 'bumper', 'spinner'].includes(other.bodyRole)) this.qaShot.gimmickHits += 1;
+  }
+
+  recordQaTargetHit(target) {
+    if (!this.qaShot || target.pegType !== 'orange') return;
+    this.qaShot.targetHits += 1;
+    this.qaShot.targetOrder.push(target.qaId ?? target.bodyRole ?? 'target');
+  }
+
+  qaSnapshot() {
+    const level = this.level ?? {};
+    const activeBalls = this.balls?.getChildren().filter((ball) => ball?.active && ball.body).length ?? 0;
+    return {
+      view: this.view,
+      level: level.level,
+      score: this.score ?? 0,
+      shotsLeft: this.shotsLeft ?? 0,
+      targetsLeft: this.targetsLeft ?? 0,
+      inFlight: this.inFlight ?? 0,
+      activeBalls,
+      levelCleared: Boolean(this.levelCleared),
+      levelFailed: Boolean(this.levelFailed),
+      orangeClearPending: Boolean(this.orangeClearPending),
+      startTargets: this.currentRun?.startTargets ?? level.targetCount ?? 0,
+      startBalls: this.currentRun?.startBalls ?? level.balls ?? 0,
+      objects: {
+        pegs: level.pegs?.length ?? 0,
+        bricks: level.bricks?.length ?? 0,
+        rails: level.rails?.length ?? 0,
+        timedBlocks: level.timedBlocks?.length ?? 0,
+        spinners: level.spinners?.length ?? 0,
+        bumpers: level.bumpers?.length ?? 0,
+      },
+      lastShot: this.qaCompletedShots.at(-1) ?? null,
+    };
   }
 
   getPointerWorld(pointer = this.input.activePointer) {
@@ -3209,7 +3302,24 @@ class PegFanScene extends Phaser.Scene {
   launchBall(pointer = this.input.activePointer) {
     if (this.view !== 'game' || this.inFlight > 0 || this.shotsLeft <= 0 || this.orangeClearPending) return;
     this.currentAim = this.calculateAim(pointer);
+    this.fireCurrentAim();
+  }
+
+  launchBallAtAngle(angle) {
+    if (this.view !== 'game' || this.inFlight > 0 || this.shotsLeft <= 0 || this.orangeClearPending) return false;
+    const safeAngle = Phaser.Math.Clamp(angle, MIN_AIM_ANGLE, MAX_AIM_ANGLE);
+    this.currentAim = {
+      x: Math.cos(safeAngle),
+      y: Math.sin(safeAngle),
+      angle: safeAngle,
+    };
+    this.fireCurrentAim();
+    return true;
+  }
+
+  fireCurrentAim() {
     const muzzle = this.getMuzzlePoint(76);
+    this.beginQaShot(this.currentAim.angle);
     this.spawnBall(
       muzzle.x,
       muzzle.y,
@@ -3377,6 +3487,7 @@ class PegFanScene extends Phaser.Scene {
     const comboBonus = this.shotCombo > 2 ? Math.min(450, (this.shotCombo - 2) * 35) : 0;
     const gained = peg.value + comboBonus;
     this.score += gained;
+    this.recordQaTargetHit(peg);
     if (peg.pegType === 'orange') this.targetsLeft -= 1;
     if (peg.pegType === 'green' && !this.orangeClearPending) this.multiballQueued = true;
     const hitSound = this.shotCombo >= 6 ? 'combo' : peg.pegType === 'orange' ? 'orange' : peg.pegType === 'green' ? 'green' : 'peg';
@@ -3429,6 +3540,7 @@ class PegFanScene extends Phaser.Scene {
     ball.caught = true;
     if (!this.orangeClearPending) this.shotsLeft += 1;
     this.score += 250;
+    if (this.qaShot) this.qaShot.caught = true;
     this.playSfx('catch', { volume: 0.7 });
     this.popText(this.bucket.x, this.bucket.y - 42, this.orangeClearPending ? '+250' : '+1 BALL', '#ffd35a');
     this.removeBall(ball);
@@ -3446,10 +3558,14 @@ class PegFanScene extends Phaser.Scene {
     ball.destroy();
     if (this.orangeClearPending && this.inFlight === 0) {
       this.shotCombo = 0;
+      this.finishQaShot('clear');
       this.finishPendingClear();
       return;
     }
-    if (this.inFlight === 0) this.shotCombo = 0;
+    if (this.inFlight === 0) {
+      this.shotCombo = 0;
+      this.finishQaShot('idle');
+    }
     if (this.inFlight === 0 && this.shotsLeft <= 0 && this.targetsLeft > 0) this.failLevel();
   }
 
@@ -3555,6 +3671,8 @@ class PegFanScene extends Phaser.Scene {
   }
 
   failLevel() {
+    if (this.levelFailed) return;
+    this.levelFailed = true;
     this.recordQaRun('fail');
     this.playSfx('fail', { volume: 0.72 });
     this.time.delayedCall(450, () => this.showResult(false));
@@ -3807,12 +3925,14 @@ class PegFanScene extends Phaser.Scene {
         return;
       }
       const speed = Math.hypot(ball.body.velocity.x, ball.body.velocity.y);
+      if (this.qaShot) this.qaShot.maxSpeed = Math.max(this.qaShot.maxSpeed ?? 0, speed);
       if (speed < 0.6 && ball.y < HEIGHT - 120) {
         ball.stallTime = (ball.stallTime ?? 0) + delta;
         if (ball.stallTime > 360) {
           const nudgeX = Phaser.Math.Clamp((ball.x - WIDTH / 2) * 1.6, -260, 260);
           if (!ball.body) return;
           this.setBodyVelocity(ball, nudgeX / 60, 7.2);
+          if (this.qaShot) this.qaShot.stuckNudges += 1;
           ball.stallTime = 0;
         }
       } else {
@@ -3893,3 +4013,57 @@ window.pegFanGame = game;
 window.pegFanGenerateLevel = generateLevel;
 window.pegFanEvaluateLevel = evaluateLevelDesign;
 window.pegFanEditorPresets = EDITOR_CURVE_PRESETS;
+window.pegFanDebug = {
+  constants: {
+    minAimAngle: MIN_AIM_ANGLE,
+    maxAimAngle: MAX_AIM_ANGLE,
+    totalLevels: TOTAL_LEVELS,
+  },
+  scene() {
+    return game.scene.getScene('PegFanScene');
+  },
+  muteAudio(muted = true) {
+    game.sound.mute = muted;
+  },
+  clone(value) {
+    return JSON.parse(JSON.stringify(value));
+  },
+  getLevel(levelNumber) {
+    return this.clone(this.scene().getPlayableLevel(levelNumber));
+  },
+  getEditorLevel() {
+    return this.clone(this.scene().buildManualLevel());
+  },
+  getEditorSlots() {
+    return this.clone(loadStageSlots());
+  },
+  loadLevel(levelNumber, levelOverride = null) {
+    const scene = this.scene();
+    const level = levelOverride ? this.clone(levelOverride) : this.getLevel(levelNumber);
+    level.editorTest = true;
+    scene.startLevel(levelNumber, level);
+    return scene.qaSnapshot();
+  },
+  launchAngle(angle) {
+    return this.scene().launchBallAtAngle(angle);
+  },
+  snapshot() {
+    return this.scene().qaSnapshot();
+  },
+  async waitForShot(timeoutMs = 7000) {
+    const scene = this.scene();
+    const startedAt = performance.now();
+    while (performance.now() - startedAt < timeoutMs) {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      if ((scene.inFlight ?? 0) === 0 && !scene.orangeClearPending) {
+        return scene.qaSnapshot();
+      }
+    }
+    if (scene.qaShot) {
+      scene.qaShot.timedOut = true;
+      scene.finishQaShot('timeout');
+    }
+    scene.balls?.getChildren().slice().forEach((ball) => scene.removeBall(ball));
+    return scene.qaSnapshot();
+  },
+};
