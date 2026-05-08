@@ -52,5 +52,6 @@ The first implementation is available as `npm run qa:auto`.
 - Headless fast mode is on by default. Use `QA_AUTO_FAST_SCALE=8` to adjust the physics time scale or `QA_AUTO_FAST=0` to compare against normal speed.
 - Saved editor slots can be targeted with `QA_AUTO_SOURCE=editor-slots npm run qa:auto` when the Playwright browser context contains editor slot data.
 - The browser exposes `window.pegFanDebug` for loading stages, launching exact angles, waiting for settled balls, and reading score/target snapshots.
+- Stage JSON can be tuned from the latest report with `npm run tune:stages`. Use `QA_TUNE_DRY_RUN=1 npm run tune:stages` to preview edits.
 
 GitHub Actions runs the smoke audit after build, static stage audit, and curve physics QA. The full 100-stage audit is intentionally opt-in until runtime is low enough for every push.

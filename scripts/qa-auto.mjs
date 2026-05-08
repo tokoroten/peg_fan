@@ -16,10 +16,10 @@ const SOURCE = process.env.QA_AUTO_SOURCE ?? 'bundled';
 const LEVEL_SPEC = process.env.QA_AUTO_LEVELS ?? (FULL ? '1-100' : '1-3');
 const WORKERS = Math.max(1, Number(process.env.QA_AUTO_WORKERS ?? Math.min(FULL ? 8 : 3, cpus().length || 1)));
 const TRIALS = Math.max(1, Number(process.env.QA_AUTO_TRIALS ?? (FULL ? 600 : 12)));
-const MAX_BALLS = Math.max(1, Number(process.env.QA_AUTO_MAX_BALLS ?? (FULL ? 18 : 4)));
+const MAX_BALLS = Math.max(1, Number(process.env.QA_AUTO_MAX_BALLS ?? (FULL ? 18 : 6)));
 const SHOT_TIMEOUT_MS = Number(process.env.QA_AUTO_SHOT_TIMEOUT_MS ?? (FULL ? 3600 : 2200));
 const FAST_MODE = process.env.QA_AUTO_FAST !== '0';
-const FAST_SCALE = Number(process.env.QA_AUTO_FAST_SCALE ?? (FULL ? 8 : 6));
+const FAST_SCALE = Number(process.env.QA_AUTO_FAST_SCALE ?? (FULL ? 3 : 2));
 const BASE_SEED = Number(process.env.QA_AUTO_SEED ?? 1729);
 
 function parseLevels(spec) {
@@ -98,19 +98,47 @@ function mean(values) {
   return finite.length ? finite.reduce((sum, value) => sum + value, 0) / finite.length : null;
 }
 
-function makeAnglePlan({ minAngle, maxAngle, levelNumber, trialIndex, maxBalls }) {
+function centerOfVertices(vertices) {
+  if (!Array.isArray(vertices) || !vertices.length) return null;
+  return {
+    x: vertices.reduce((sum, point) => sum + point.x, 0) / vertices.length,
+    y: vertices.reduce((sum, point) => sum + point.y, 0) / vertices.length,
+  };
+}
+
+function targetPoints(stage) {
+  return [
+    ...(stage?.pegs ?? []).filter((peg) => peg.type === 'orange').map((peg) => ({ x: peg.x, y: peg.y })),
+    ...(stage?.bricks ?? []).filter((brick) => brick.type === 'orange').map((brick) => (
+      centerOfVertices(brick.vertices) ?? { x: brick.x, y: brick.y }
+    )),
+  ].filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+}
+
+function angleToPoint(point) {
+  return Math.atan2(point.y - 168, point.x - 450);
+}
+
+function makeAnglePlan({ minAngle, maxAngle, levelNumber, trialIndex, maxBalls, stage }) {
   const rng = createRng(BASE_SEED + levelNumber * 100003 + trialIndex * 9176);
   const plan = [];
   const center = (minAngle + maxAngle) / 2;
   const width = maxAngle - minAngle;
+  const targets = targetPoints(stage);
+  const sortedTargets = [...targets].sort((a, b) => a.y - b.y || Math.abs(a.x - 450) - Math.abs(b.x - 450));
+  const targetOffsets = [-0.32, -0.22, -0.14, -0.07, 0, 0.07, 0.14, 0.22, 0.32];
   for (let shot = 0; shot < maxBalls; shot += 1) {
     const mode = rng();
     let angle;
-    if (mode < 0.52) {
+    if (sortedTargets.length && mode < 0.68) {
+      const target = sortedTargets[(trialIndex + shot * 3 + Math.floor(rng() * sortedTargets.length)) % sortedTargets.length];
+      const offset = targetOffsets[(trialIndex + shot + Math.floor(rng() * targetOffsets.length)) % targetOffsets.length];
+      angle = angleToPoint(target) + offset + (rng() - 0.5) * 0.05;
+    } else if (mode < 0.82) {
       angle = minAngle + width * rng();
-    } else if (mode < 0.78) {
-      const lane = Math.floor(rng() * 9);
-      angle = minAngle + width * (lane / 8) + (rng() - 0.5) * 0.09;
+    } else if (mode < 0.94) {
+      const lane = Math.floor(rng() * 13);
+      angle = minAngle + width * (lane / 12) + (rng() - 0.5) * 0.12;
     } else {
       angle = center + (rng() - 0.5) * width * 0.42;
     }
@@ -232,14 +260,20 @@ async function collectTargets(page, levels) {
         label: `SLOT ${index + 1}`,
         levelNumber: slot.level.level ?? index + 1,
         levelOverride: { ...slot.level, level: slot.level.level ?? index + 1, editorTest: true },
+        stage: { ...slot.level, level: slot.level.level ?? index + 1, editorTest: true },
       }));
   }
-  return levels.map((levelNumber) => ({
-    id: `level-${levelNumber}`,
-    label: `L${String(levelNumber).padStart(3, '0')}`,
-    levelNumber,
-    levelOverride: null,
-  }));
+  const stages = await page.evaluate((requestedLevels) => requestedLevels.map((levelNumber) => window.pegFanDebug.getLevel(levelNumber)), levels);
+  return stages.map((stage, index) => {
+    const levelNumber = levels[index];
+    return {
+      id: `level-${levelNumber}`,
+      label: `L${String(levelNumber).padStart(3, '0')}`,
+      levelNumber,
+      levelOverride: null,
+      stage,
+    };
+  });
 }
 
 async function preparePage(browser, pageErrors) {
@@ -299,6 +333,7 @@ async function evaluateTarget(page, constants, target) {
       levelNumber: target.levelNumber,
       trialIndex: index,
       maxBalls,
+      stage: target.stage,
     });
     trials.push(await runTrial(page, target, anglePlan, index));
   }

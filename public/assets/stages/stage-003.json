@@ -1,8 +1,8 @@
 {
   "level": 3,
   "concept": "open arcs",
-  "balls": 11,
-  "targetCount": 5,
+  "balls": 13,
+  "targetCount": 3,
   "pegs": [
     {
       "x": 639.0574528909001,
@@ -19,7 +19,7 @@
     {
       "x": 602.0525134823922,
       "y": 647.4670545932074,
-      "type": "orange",
+      "type": "blue",
       "motion": null
     },
     {
@@ -73,7 +73,7 @@
     {
       "x": 323.01190222874914,
       "y": 658.7396343528012,
-      "type": "orange",
+      "type": "blue",
       "motion": null
     },
     {
@@ -103,7 +103,7 @@
     {
       "x": 276.66666666666663,
       "y": 759.6602540378444,
-      "type": "orange",
+      "type": "blue",
       "motion": null
     },
     {
@@ -127,12 +127,114 @@
     {
       "x": 623.3333333333334,
       "y": 742.3397459621556,
-      "type": "orange",
+      "type": "blue",
       "motion": null
     },
     {
       "x": 710,
       "y": 751,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 222,
+      "y": 360,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 342,
+      "y": 360,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 462,
+      "y": 360,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 582,
+      "y": 360,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 702,
+      "y": 360,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 172,
+      "y": 493,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 287,
+      "y": 493,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 402,
+      "y": 493,
+      "type": "orange",
+      "motion": null
+    },
+    {
+      "x": 522,
+      "y": 493,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 637,
+      "y": 493,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 752,
+      "y": 493,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 232,
+      "y": 605,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 512,
+      "y": 757,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 347,
+      "y": 605,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 462,
+      "y": 605,
+      "type": "orange",
+      "motion": null
+    },
+    {
+      "x": 577,
+      "y": 605,
+      "type": "blue",
+      "motion": null
+    },
+    {
+      "x": 692,
+      "y": 605,
       "type": "blue",
       "motion": null
     }
@@ -151,5 +253,17 @@
   "spinners": [],
   "bumpers": [],
   "bucketSpeed": 137.5,
-  "rewardIndex": 0
+  "rewardIndex": 0,
+  "tunedFromQa": {
+    "at": "2026-05-08T16:13:55.190Z",
+    "source": "qa-results/autoplay-report.json",
+    "expectedDifficulty": "TUTORIAL",
+    "observedDifficulty": "HARD",
+    "clearRate": 0.3333333333333333,
+    "medianBallsToClear": 11,
+    "deadShotRate": 0.3108108108108108,
+    "actions": [
+      "excess orange -1"
+    ]
+  }
 }

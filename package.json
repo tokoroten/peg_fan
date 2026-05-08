@@ -10,6 +10,7 @@
     "audit:stages": "node scripts/audit-stages.mjs",
     "qa:curves": "node scripts/qa-curves.mjs",
     "qa:auto": "node scripts/qa-auto.mjs",
+    "tune:stages": "node scripts/tune-stages-from-qa.mjs",
     "apply:stage-bundle": "node scripts/apply-stage-bundle.mjs"
   },
   "keywords": [],
